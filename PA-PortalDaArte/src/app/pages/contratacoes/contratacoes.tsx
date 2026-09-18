@@ -58,18 +58,7 @@ const FAVORITE_ARTISTS = [
     lightBgColor: '#EBE4FA',
     iconColor: '#8C52FF',
   },
-  {
-    id: '4',
-    name: 'Juliana Diniz',
-    category: 'MPB • Cantora',
-    rating: 4.9,
-    reviews: 128,
-    price: 'R$ 800',
-    icon: Mic,
-    darkBgColor: '#1B3736',
-    lightBgColor: '#E0F2F1',
-    iconColor: '#20B2AA',
-  },
+ 
 ];
 
 export default function IndexScreen() {
