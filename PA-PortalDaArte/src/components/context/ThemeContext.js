@@ -22,6 +22,8 @@ export const lightTheme = {
   searchBg: '#F5EBE4',
   borderColor: '#E8DCD3',
   menuActiveBg: '#FFF0E6',
+  sendBtnBg: '#b91010',
+  backgroundColor: '#b91010',
 };
 
 // Aqui as cores do modo escuro que você já usava
@@ -36,6 +38,8 @@ export const darkTheme = {
   searchBg: '#0B101D',
   borderColor: '#1A263D',
   menuActiveBg: '#1E1B2B',
+  sendBtnBg: '#ce3d11',
+  backgroundColor: '#ce3d11'
 };
 
 const ThemeContext = createContext();
