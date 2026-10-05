@@ -1,15 +1,6 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import LoginScreen from './pages/login/login';
 
-
-import Tela_Inicial from './pages/explorar/explorar';
-
-
-const Stack = createNativeStackNavigator();
-
-export default function App() {
-  return (
-    <Tela_Inicial/>
-  );
+export default function IndexScreen() {
+  return <LoginScreen />;
 }
