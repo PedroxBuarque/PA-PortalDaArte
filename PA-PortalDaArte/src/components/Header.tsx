@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Image,
   StyleSheet, 
@@ -8,24 +8,46 @@ import {
   Text,
   Modal
 } from 'react-native';
-import { Search, Bell, Settings, Sun, Moon } from 'lucide-react-native';
+import { Search, Bell, Settings, Sun, Moon, LogOut } from 'lucide-react-native';
 import { useTheme } from './context/ThemeContext';
 import { useProfile } from './context/ProfileContext';
+import { obterUsuario } from '../app/services/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
 
 export default function Header() {
   const [isMenuVisible, setIsMenuVisible] = useState(false);
-  
-  // Puxando o tema e a função de trocar tema do Contexto
+  const [isAvatarMenuVisible, setIsAvatarMenuVisible] = useState(false);
+  const [userName, setUserName] = useState('U');
+
   const { isLightMode, toggleTheme, theme } = useTheme();
   const { profileImage } = useProfile();
   
-  // Gerando os estilos baseados no tema atual
   const styles = getStyles(theme);
+
+  useEffect(() => {
+    async function fetchUser() {
+      const user = await obterUsuario();
+      if (user && user.email) {
+        setUserName(user.email.charAt(0).toUpperCase());
+      }
+    }
+    fetchUser();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await AsyncStorage.removeItem('access_token');
+      setIsMenuVisible(false);
+      setIsAvatarMenuVisible(false);
+      router.replace('/pages/login/login');
+    } catch (error) {
+      console.error('Erro ao sair:', error);
+    }
+  };
 
   return (
     <View style={styles.header}>
-      
-      {/* BARRA DE PESQUISA COM BORDA DINÂMICA */}
       <View style={styles.searchBar}>
         <Search size={18} color={theme.textSecondary} />
         <TextInput
@@ -35,34 +57,37 @@ export default function Header() {
         />
       </View>
 
-      {/* ÍCONES DA DIREITA */}
       <View style={styles.rightIcons}>
         <TouchableOpacity style={styles.iconButton}>
           <Bell size={20} color={theme.textSecondary} />
         </TouchableOpacity>
         
-        {/* Botão da Engrenagem (no topo) */}
         <TouchableOpacity 
           style={styles.iconButton}
           onPress={() => setIsMenuVisible(!isMenuVisible)}
           activeOpacity={0.8}
         >
-          <Settings key={isLightMode ? 'light-top' : 'dark-top'} size={20} color={theme.textSecondary} />
+          <Settings size={20} color={theme.textSecondary} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.userAvatar}>
+        {/* Botão da Foto de Perfil com Abertura de Menu */}
+        <TouchableOpacity 
+          style={styles.userAvatar}
+          onPress={() => setIsAvatarMenuVisible(!isAvatarMenuVisible)}
+          activeOpacity={0.8}
+        >
           {profileImage ? (
             <Image
               source={{ uri: profileImage }}
               style={styles.userAvatarImage}
             />
           ) : (
-            <Text style={styles.userAvatarText}>U</Text>
+            <Text style={styles.userAvatarText}>{userName}</Text>
           )}
         </TouchableOpacity>
       </View>
 
-      {/* MODAL DE CONFIGURAÇÕES */}
+      {/* Menu da Engrenagem */}
       <Modal
         visible={isMenuVisible}
         transparent={true}
@@ -75,32 +100,21 @@ export default function Header() {
           onPress={() => setIsMenuVisible(false)}
         >
           <TouchableOpacity activeOpacity={1} style={styles.dropdownMenu}>
-            
-            {/* Opção de Configurações - Engrenagem do dropdown */}
             <TouchableOpacity 
               style={styles.dropdownItem} 
-              onPress={() => {
-                setIsMenuVisible(false);
-              }}
+              onPress={() => setIsMenuVisible(false)}
             >
               <View style={styles.iconWrapper}>
-                <Settings 
-                  key={isLightMode ? 'light-gear' : 'dark-gear'} 
-                  size={18} 
-                  color={theme.textPrimary} 
-                />
+                <Settings size={18} color={theme.textPrimary} />
               </View>
               <Text style={styles.dropdownText}>Configurações</Text>
             </TouchableOpacity>
             
             <View style={styles.divider} />
             
-            {/* Opção de Trocar Tema */}
             <TouchableOpacity 
               style={styles.dropdownItem} 
-              onPress={() => {
-                toggleTheme();
-              }}
+              onPress={() => toggleTheme()}
             >
               <View style={styles.iconWrapper}>
                 {isLightMode ? (
@@ -113,16 +127,41 @@ export default function Header() {
                 {isLightMode ? 'Ativar Modo Escuro' : 'Ativar Modo Claro'}
               </Text>
             </TouchableOpacity>
-            
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
-      
+
+      {/* Menu da Foto de Perfil (Deslogar) */}
+      <Modal
+        visible={isAvatarMenuVisible}
+        transparent={true}
+        animationType="none"
+        onRequestClose={() => setIsAvatarMenuVisible(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay} 
+          activeOpacity={1} 
+          onPress={() => setIsAvatarMenuVisible(false)}
+        >
+          <TouchableOpacity activeOpacity={1} style={[styles.dropdownMenu, { right: 32 }]}>
+            <TouchableOpacity 
+              style={styles.dropdownItem} 
+              onPress={handleLogout}
+            >
+              <View style={styles.iconWrapper}>
+                <LogOut size={18} color="#E05A10" />
+              </View>
+              <Text style={[styles.dropdownText, { color: '#E05A10' }]}>
+                Sair da conta
+              </Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
 
-// Transformamos os estilos em uma função que recebe as cores do tema
 const getStyles = (theme) => StyleSheet.create({
   header: {
     height: 70,
@@ -143,7 +182,6 @@ const getStyles = (theme) => StyleSheet.create({
     height: 40,
     width: '50%',
     maxWidth: 450,
-    // ADICIONADO: Borda que muda dinamicamente com o tema
     borderWidth: 1,
     borderColor: theme.borderColor, 
   },
@@ -152,7 +190,6 @@ const getStyles = (theme) => StyleSheet.create({
     marginLeft: 10,
     color: theme.textPrimary,
     fontSize: 13,
-    outlineStyle: 'none', 
   },
   rightIcons: {
     flexDirection: 'row',
@@ -170,6 +207,7 @@ const getStyles = (theme) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 4,
+    overflow: 'hidden',
   },
   userAvatarText: {
     color: '#FFFFFF',
