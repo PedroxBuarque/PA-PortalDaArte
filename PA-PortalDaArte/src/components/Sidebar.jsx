@@ -93,7 +93,7 @@ export default function Sidebar() {
   return (
     <View style={styles.sidebar}>
       <TouchableOpacity
-        onPress={() => router.navigate('/')}
+        onPress={() => router.navigate('/pages/explorar/explorar')}
         activeOpacity={0.8}
         style={styles.brandContainer}
       >

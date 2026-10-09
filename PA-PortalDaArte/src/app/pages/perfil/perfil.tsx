@@ -79,7 +79,15 @@ const FIXED_CATEGORIES = [
 
 export default function IndexScreen() {
   const { theme, isLightMode } = useTheme();
-  const { profileImage, saveProfileImage } = useProfile();
+  const {
+    profileImage,
+    saveProfileImage,
+    profileName: savedProfileName,
+    location: savedLocation,
+    profileCategory: savedProfileCategory,
+    bio: savedBio,
+    updateProfile,
+  } = useProfile();
   const styles = getStyles(theme);
 
   /* ===================================================== */
@@ -113,11 +121,11 @@ export default function IndexScreen() {
     null,
   );
 
-  const [profileName, setProfileName] = useState("Clara Mendonça");
-  const [editedProfileName, setEditedProfileName] = useState(profileName);
+  const [profileName, setProfileName] = useState(savedProfileName);
+  const [editedProfileName, setEditedProfileName] = useState(savedProfileName);
 
-  const [location, setLocation] = useState("Caruaru, PE");
-  const [editedLocation, setEditedLocation] = useState(location);
+  const [location, setLocation] = useState(savedLocation);
+  const [editedLocation, setEditedLocation] = useState(savedLocation);
 
   // Estados para o Modal de Seleção de Cidade via API IBGE
   const [isCityModalVisible, setIsCityModalVisible] = useState(false);
@@ -127,16 +135,14 @@ export default function IndexScreen() {
 
   // Estados para a Categoria Fixa e seu Modal
   const [profileCategory, setProfileCategory] = useState(
-    "Música • Violão e Voz",
+    savedProfileCategory,
   );
   const [editedProfileCategory, setEditedProfileCategory] =
-    useState(profileCategory);
+    useState(savedProfileCategory);
   const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
 
-  const [bio, setBio] = useState(
-    "Artista e cantora apaixonada por música brasileira. Trabalho com apresentações acústicas, eventos, casamentos e apresentações particulares.",
-  );
-  const [editedBio, setEditedBio] = useState(bio);
+  const [bio, setBio] = useState(savedBio);
+  const [editedBio, setEditedBio] = useState(savedBio);
 
   // Lista de Links Customizados Globais
   const [customLinks, setCustomLinks] = useState<CustomLink[]>([
@@ -264,11 +270,19 @@ export default function IndexScreen() {
       return;
     }
 
-    await saveProfileImage(editedProfileImage);
-    setProfileName(editedProfileName.trim());
-    setLocation(editedLocation.trim());
-    setProfileCategory(editedProfileCategory.trim());
-    setBio(editedBio.trim());
+    const nextProfile = {
+      profileImage: editedProfileImage,
+      profileName: editedProfileName.trim(),
+      location: editedLocation.trim(),
+      profileCategory: editedProfileCategory.trim(),
+      bio: editedBio.trim(),
+    };
+
+    updateProfile(nextProfile);
+    setProfileName(nextProfile.profileName);
+    setLocation(nextProfile.location);
+    setProfileCategory(nextProfile.profileCategory);
+    setBio(nextProfile.bio);
     setCustomLinks([...editedCustomLinks]);
     setIsEditingProfile(false);
   };
