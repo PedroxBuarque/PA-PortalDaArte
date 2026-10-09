@@ -1,6 +1,3 @@
-import { router } from "expo-router";
-import { useProfile } from "../../../components/context/ProfileContext";
-import { Lock } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -16,12 +13,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { router } from "expo-router";
+import { Lock } from "lucide-react-native";
 
 const DOC_TYPES = ["CPF", "CNPJ", "MEI"];
+const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export default function RegisterScreen() {
-  const { saveRegistration } = useProfile();
-
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
@@ -46,7 +44,7 @@ export default function RegisterScreen() {
     async function fetchEstados() {
       try {
         const response = await fetch(
-          "https://servicodados.ibge.gov.br/api/v1/localidades/estados",
+          "https://servicodados.ibge.gov.br/api/v1/localidades/estados"
         );
         const data = await response.json();
         const ufs = data
@@ -64,7 +62,7 @@ export default function RegisterScreen() {
     setIsLoadingCidades(true);
     try {
       const response = await fetch(
-        `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios`,
+        `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios`
       );
       const data = await response.json();
       const cidades = data
@@ -100,7 +98,7 @@ export default function RegisterScreen() {
     if (error) setError("");
   };
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
     if (
       !email.trim() ||
       !fullName.trim() ||
@@ -115,24 +113,47 @@ export default function RegisterScreen() {
     }
 
     const rawDoc = docNumber.replace(/\D/g, "");
-    if (docType === "CPF" && rawDoc.length < 11)
-      return setError("CPF inválido.");
-    if ((docType === "CNPJ" || docType === "MEI") && rawDoc.length < 14)
-      return setError(`${docType} inválido.`);
+    if (docType === "CPF" && rawDoc.length < 11) {
+      setError("CPF inválido.");
+      return;
+    }
+    if ((docType === "CNPJ" || docType === "MEI") && rawDoc.length < 14) {
+      setError(`${docType} inválido.`);
+      return;
+    }
 
-    setError("");
+    try {
+      setError("");
 
-    saveRegistration({
-      email,
-      fullName,
-      password,
-      docType,
-      docNumber,
-      state,
-      city,
-    });
+      const response = await fetch(`${URL_API}/api/cadastro`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+          nome_completo: fullName.trim(),
+          senha: password,
+          tipo_documento: docType === "CPF" ? "cpf" : "cnpj",
+          cpf: docType === "CPF" ? rawDoc : null,
+          cnpj: docType !== "CPF" ? rawDoc : null,
+          estado: state,
+          cidade: city,
+        }),
+      });
 
-    router.replace("/pages/login/login");
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.detail || "Não foi possível realizar o cadastro.");
+        return;
+      }
+
+      router.replace("/pages/login/login" as any);
+    } catch (err) {
+      console.log("Erro de conexão no cadastro:", err);
+      setError("Não foi possível conectar ao servidor. Verifique sua conexão.");
+    }
   };
 
   const renderPickerModal = (
@@ -140,7 +161,7 @@ export default function RegisterScreen() {
     data: string[],
     title: string,
     onSelect: (val: string) => void,
-    isLoading?: boolean,
+    isLoading?: boolean
   ) => {
     return (
       <Modal
@@ -284,8 +305,8 @@ export default function RegisterScreen() {
                   {docType === "CPF"
                     ? "CPF"
                     : docType === "MEI" || docType === "CNPJ"
-                      ? "CNPJ"
-                      : "CPF ou CNPJ"}
+                    ? "CNPJ"
+                    : "CPF ou CNPJ"}
                 </Text>
                 <TextInput
                   value={docNumber}
@@ -384,7 +405,7 @@ export default function RegisterScreen() {
           cidadesList,
           "Cidade",
           setCity,
-          isLoadingCidades,
+          isLoadingCidades
         )}
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -476,7 +497,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     ...Platform.select({ web: { outlineStyle: "none" } }),
   },
-
   selectInput: {
     height: 50,
     borderWidth: 1,
@@ -489,7 +509,6 @@ const styles = StyleSheet.create({
   },
   placeholderText: { color: "#9D8E85", fontSize: 14 },
   selectText: { color: "#3D261D", fontSize: 14 },
-
   passwordContainer: {
     height: 50,
     borderWidth: 1,
@@ -545,7 +564,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginLeft: 6,
   },
-
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",

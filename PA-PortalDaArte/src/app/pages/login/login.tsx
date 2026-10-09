@@ -1,5 +1,3 @@
-import { router } from "expo-router";
-import { ArrowLeft, Lock, Mail } from "lucide-react-native";
 import React, { useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -11,11 +9,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useProfile } from "../../../components/context/ProfileContext";
+import { router } from "expo-router";
+import { ArrowLeft, Lock, Mail } from "lucide-react-native";
+import { salvarLogin } from "../../services/auth";
+
+const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export default function LoginScreen() {
-  const { email: registeredEmail, password: registeredPassword } = useProfile();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -24,27 +24,39 @@ export default function LoginScreen() {
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [recoveryMessage, setRecoveryMessage] = useState("");
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       setError("Informe seu e-mail e sua senha para continuar.");
       return;
     }
 
-    if (
-      registeredEmail &&
-      email.trim().toLowerCase() !== registeredEmail.toLowerCase()
-    ) {
-      setError("E-mail não encontrado. Verifique os dados ou cadastre-se.");
-      return;
-    }
+    try {
+      setError("");
 
-    if (registeredPassword && password !== registeredPassword) {
-      setError("Senha incorreta. Se precisar, use “Esqueceu a senha?”.");
-      return;
-    }
+      const response = await fetch(`${URL_API}/api/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          usuario: email.trim(),
+          senha: password,
+        }),
+      });
 
-    setError("");
-    router.replace("/pages/explorar/explorar");
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.detail || "E-mail ou senha incorretos.");
+        return;
+      }
+
+      await salvarLogin(data);
+      router.replace("/pages/explorar/explorar" as any);
+    } catch (err) {
+      console.log("Erro de conexão no login:", err);
+      setError("Não foi possível conectar ao servidor. Verifique sua conexão.");
+    }
   };
 
   const openRecovery = () => {
@@ -61,16 +73,39 @@ export default function LoginScreen() {
     setError("");
   };
 
-  const handleRecovery = () => {
+  const handleRecovery = async () => {
     if (!recoveryEmail.trim()) {
       setError("Informe o e-mail usado no cadastro.");
       return;
     }
 
-    setError("");
-    setRecoveryMessage(
-      "Se o e-mail informado estiver cadastrado, você receberá um link com as instruções para redefinir sua senha.",
-    );
+    try {
+      setError("");
+
+      const response = await fetch(`${URL_API}/api/recuperar-senha`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: recoveryEmail.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.detail || "Não foi possível processar a recuperação.");
+        return;
+      }
+
+      setRecoveryMessage(
+        data.mensagem || "Se o e-mail informado estiver cadastrado, você receberá um link com as instruções para redefinir sua senha."
+      );
+    } catch (err) {
+      console.log("Erro de conexão na recuperação:", err);
+      setError("Não foi possível conectar ao servidor. Verifique sua conexão.");
+    }
   };
 
   if (isRecovering) {
