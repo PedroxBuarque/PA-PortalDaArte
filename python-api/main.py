@@ -107,6 +107,7 @@ class PerfilUpdate(BaseModel):
     cpf: Optional[str] = None
     cnpj: Optional[str] = None
     foto_perfil: Optional[str] = None  # Recebe a imagem codificada em Base64
+    biografia: Optional[str] = None
 
 class PerfilArtistaCreate(BaseModel):
     nome_artistico: str
@@ -594,8 +595,8 @@ def obter_perfil_logado(current_user: dict = Depends(get_usuario_atual)):
             "nome_completo": usuario["nome_completo"],
             "cidade": usuario["cidade"],
             "estado": usuario["estado"],
-            "foto_perfil": usuario["foto_perfil_url"],  # Retorna o Base64 gravado na coluna foto_perfil_url
-            "is_artista": is_artista,
+            "foto_perfil": usuario["foto_perfil_url"],
+            "is_artista": is_artista,  # Retorna True apenas se o usuário tiver perfil de artista
             "nome_artistico": nome_artistico,
             "biografia": biografia,
             "estatisticas": estatisticas
@@ -622,7 +623,7 @@ def obter_perfil_logado(current_user: dict = Depends(get_usuario_atual)):
 
 @app.put("/api/perfis/me", tags=["Perfil"])
 def atualizar_perfil_logado(perfil: PerfilUpdate, current_user: dict = Depends(get_usuario_atual)):
-    """Atualiza os dados pessoais, foto de perfil (Base64) e documentos na tabela `perfis` do usuário logado."""
+    """Atualiza os dados pessoais, foto de perfil (Base64) e biografia na tabela `perfis` do usuário logado."""
     usuario_id = current_user["id"]
     conexao = None
     cursor = None
@@ -661,6 +662,10 @@ def atualizar_perfil_logado(perfil: PerfilUpdate, current_user: dict = Depends(g
                 perfil.nome_completo, perfil.telefone, perfil.cidade,
                 perfil.estado, tipo_doc, cpf_val if tipo_doc == 'cpf' else None, cnpj_val if tipo_doc == 'cnpj' else None, perfil.foto_perfil, usuario_id
             ))
+
+        # Atualiza também a biografia caso o usuário seja artista
+        if perfil.biografia is not None:
+            cursor.execute("UPDATE perfis_artista SET biografia = %s WHERE usuario_id = %s", (perfil.biografia, usuario_id))
 
         conexao.commit()
         return {"status": "sucesso", "mensagem": "Perfil atualizado com sucesso"}

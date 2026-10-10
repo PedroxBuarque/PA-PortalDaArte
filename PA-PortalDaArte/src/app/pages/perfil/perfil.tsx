@@ -42,7 +42,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import Header from "../../../components/Header";
 import Sidebar from "../../../components/Sidebar";
-import { useProfile } from "../../../components/context/ProfileContext";
 import { useTheme } from "../../../components/context/ThemeContext";
 
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -82,10 +81,16 @@ const FIXED_CATEGORIES = [
 
 export default function IndexScreen() {
   const { theme, isLightMode } = useTheme();
-  const { profileImage, saveProfileImage } = useProfile();
   const styles = getStyles(theme);
 
   const [loadingBackend, setLoadingBackend] = useState(true);
+  const [isArtista, setIsArtista] = useState(false);
+  const [isBecomingArtistModalVisible, setIsBecomingArtistModalVisible] = useState(false);
+  const [artistNameInput, setArtistNameInput] = useState("");
+  const [selectedArtistCategory, setSelectedArtistCategory] = useState(FIXED_CATEGORIES[0]);
+  const [isArtistCategoryModalVisible, setIsArtistCategoryModalVisible] = useState(false);
+  const [isSubmittingArtist, setIsSubmittingArtist] = useState(false);
+
   const [estatisticas, setEstatisticas] = useState({
     avaliacao_media: "0.0",
     total_contratacoes: 0,
@@ -111,9 +116,10 @@ export default function IndexScreen() {
   };
 
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
   const [editedProfileImage, setEditedProfileImage] = useState<string | null>(null);
 
-  const [profileName, setProfileName] = useState("Artista");
+  const [profileName, setProfileName] = useState("Usuário");
   const [editedProfileName, setEditedProfileName] = useState("");
 
   const [location, setLocation] = useState("Caruaru, PE");
@@ -124,17 +130,14 @@ export default function IndexScreen() {
   const [citiesList, setCitiesList] = useState<string[]>([]);
   const [isLoadingCities, setIsLoadingCities] = useState(false);
 
-  const [profileCategory, setProfileCategory] = useState(FIXED_CATEGORIES[0]);
+  const [profileCategory, setProfileCategory] = useState("Conta Cliente / Contratante");
   const [editedProfileCategory, setEditedProfileCategory] = useState(FIXED_CATEGORIES[0]);
   const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
 
-  const [bio, setBio] = useState("Conte um pouco sobre sua trajetória artística...");
+  const [bio, setBio] = useState("Bem-vindo ao Portal da Arte.");
   const [editedBio, setEditedBio] = useState("");
 
-  const [customLinks, setCustomLinks] = useState<CustomLink[]>([
-    { id: "1", label: "Spotify", url: "https://spotify.com" },
-    { id: "2", label: "Instagram", url: "https://instagram.com" },
-  ]);
+  const [customLinks, setCustomLinks] = useState<CustomLink[]>([]);
   const [editedCustomLinks, setEditedCustomLinks] = useState<CustomLink[]>([]);
 
   const [isLinkModalVisible, setIsLinkModalVisible] = useState(false);
@@ -155,6 +158,7 @@ export default function IndexScreen() {
   const [videoCover, setVideoCover] = useState<any>(null);
   const [videoItems, setVideoItems] = useState<VideoItem[]>([]);
 
+  // Busca isolada e estrita do perfil da conta logada
   useEffect(() => {
     async function fetchPerfilLogado() {
       try {
@@ -177,19 +181,22 @@ export default function IndexScreen() {
         const result = await response.json();
         if (response.ok && result.dados) {
           const dados = result.dados;
-          const nomeCompleto = dados.nome_completo || dados.email || "Artista";
+          const nomeCompleto = dados.nome_completo || dados.email || "Usuário";
           const cidadeEstado = dados.cidade && dados.estado ? `${dados.cidade}, ${dados.estado}` : "Caruaru, PE";
-          const biografiaApi = dados.biografia || "Conte um pouco sobre sua trajetória artística e musical...";
-          const catApi = dados.nome_artistico ? `Artista • ${dados.nome_artistico}` : FIXED_CATEGORIES[0];
+          
+          setIsArtista(!!dados.is_artista);
+
+          if (dados.is_artista) {
+            setProfileCategory(dados.nome_artistico ? `${dados.nome_artistico}` : FIXED_CATEGORIES[0]);
+            setBio(dados.biografia || "Conte um pouco sobre sua trajetória artística...");
+          } else {
+            setProfileCategory("Conta Cliente / Contratante");
+            setBio(dados.biografia || "Explorando o Portal da Arte para contratar talentos e curtir apresentações.");
+          }
 
           setProfileName(nomeCompleto);
           setLocation(cidadeEstado);
-          setBio(biografiaApi);
-          setProfileCategory(catApi);
-
-          if (dados.foto_perfil) {
-            saveProfileImage(dados.foto_perfil);
-          }
+          setProfileImage(dados.foto_perfil || null);
 
           if (dados.estatisticas) {
             setEstatisticas({
@@ -242,11 +249,63 @@ export default function IndexScreen() {
     fetchAllIbgeCities();
   }, []);
 
+  const handleConfirmBecomeArtist = async () => {
+    if (!artistNameInput.trim()) {
+      Alert.alert("Atenção", "Por favor, digite o nome do artista ou da banda.");
+      return;
+    }
+
+    try {
+      setIsSubmittingArtist(true);
+      const token = await AsyncStorage.getItem("access_token");
+      if (!token) return;
+
+      const partesCidade = location.split(",");
+      const cidadeNome = partesCidade[0]?.trim() || "Caruaru";
+      const estadoSigla = partesCidade[1]?.trim() || "PE";
+
+      const nomeArtistaLimpo = artistNameInput.trim();
+
+      const response = await fetch(`${URL_API}/api/artistas`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          nome_artistico: nomeArtistaLimpo,
+          biografia: bio,
+          anos_experiencia: 1,
+          modalidade_atendimento: "ambos",
+          cidade_atendimento: cidadeNome,
+          estado_atendimento: estadoSigla,
+        }),
+      });
+
+      const result = await response.json();
+      if (response.ok) {
+        setIsArtista(true);
+        setProfileCategory(selectedArtistCategory);
+        setProfileName(nomeArtistaLimpo);
+        setIsBecomingArtistModalVisible(false);
+        setArtistNameInput("");
+        Alert.alert("Sucesso", "Parabéns! Agora sua conta é de Artista e os recursos de portfólio foram liberados.");
+      } else {
+        Alert.alert("Erro", result.detail || "Não foi possível cadastrar como artista.");
+      }
+    } catch (error) {
+      console.error("Erro ao se tornar artista:", error);
+      Alert.alert("Erro", "Falha de comunicação com o servidor.");
+    } finally {
+      setIsSubmittingArtist(false);
+    }
+  };
+
   const handleStartEditingProfile = () => {
     setEditedProfileImage(profileImage);
     setEditedProfileName(profileName);
     setEditedLocation(location);
-    setEditedProfileCategory(profileCategory);
+    setEditedProfileCategory(isArtista ? profileCategory : FIXED_CATEGORIES[0]);
     setEditedBio(bio);
     setEditedCustomLinks(JSON.parse(JSON.stringify(customLinks)));
     setIsEditingProfile(true);
@@ -260,7 +319,6 @@ export default function IndexScreen() {
     if (
       !editedProfileName.trim() ||
       !editedLocation.trim() ||
-      !editedProfileCategory.trim() ||
       !editedBio.trim()
     ) {
       return;
@@ -285,7 +343,7 @@ export default function IndexScreen() {
             cidade: cidadeNome,
             estado: estadoSigla,
             biografia: editedBio.trim(),
-            foto_perfil: editedProfileImage, // Envia a foto em Base64 para salvar no banco
+            foto_perfil: editedProfileImage,
             tipo_documento: "cpf",
           }),
         });
@@ -293,11 +351,11 @@ export default function IndexScreen() {
 
       setProfileName(editedProfileName.trim());
       setLocation(editedLocation.trim());
-      setProfileCategory(editedProfileCategory.trim());
-      setBio(editedBio.trim());
-      if (editedProfileImage) {
-        saveProfileImage(editedProfileImage);
+      if (isArtista) {
+        setProfileCategory(editedProfileCategory.trim());
       }
+      setBio(editedBio.trim());
+      setProfileImage(editedProfileImage);
       setCustomLinks([...editedCustomLinks]);
       setIsEditingProfile(false);
     } catch (error) {
@@ -362,7 +420,6 @@ export default function IndexScreen() {
     setEditedCustomLinks(editedCustomLinks.filter((item) => item.id !== id));
   };
 
-  // Seletor robusto com expo-image-picker que converte e exibe a imagem instantaneamente
   const handlePickProfileImage = async () => {
     try {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -637,7 +694,7 @@ export default function IndexScreen() {
                           <View style={styles.editFormColumn}>
                             <View style={styles.editInputBox}>
                               <Text style={styles.editFieldLabel}>
-                                Nome do Artista
+                                {isArtista ? "Nome do Artista" : "Nome Completo"}
                               </Text>
                               <TextInput
                                 value={editedProfileName}
@@ -674,34 +731,36 @@ export default function IndexScreen() {
                               </View>
                             </TouchableOpacity>
 
-                            <TouchableOpacity
-                              style={styles.editInputBox}
-                              onPress={() => setIsCategoryModalVisible(true)}
-                              activeOpacity={0.8}
-                            >
-                              <Text style={styles.editFieldLabel}>
-                                Categoria de Atuação
-                              </Text>
-                              <View style={styles.selectBoxRow}>
-                                <Music
-                                  size={14}
-                                  color={theme.accent}
-                                  style={{ marginRight: 6 }}
-                                />
-                                <Text
-                                  style={[
-                                    styles.profileCategorySelectText,
-                                    { flex: 1 },
-                                  ]}
-                                >
-                                  {editedProfileCategory}
+                            {isArtista && (
+                              <TouchableOpacity
+                                style={styles.editInputBox}
+                                onPress={() => setIsCategoryModalVisible(true)}
+                                activeOpacity={0.8}
+                              >
+                                <Text style={styles.editFieldLabel}>
+                                  Categoria de Atuação
                                 </Text>
-                                <ChevronDown
-                                  size={16}
-                                  color={theme.textSecondary}
-                                />
-                              </View>
-                            </TouchableOpacity>
+                                <View style={styles.selectBoxRow}>
+                                  <Music
+                                    size={14}
+                                    color={theme.accent}
+                                    style={{ marginRight: 6 }}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.profileCategorySelectText,
+                                      { flex: 1 },
+                                    ]}
+                                  >
+                                    {editedProfileCategory}
+                                  </Text>
+                                  <ChevronDown
+                                    size={16}
+                                    color={theme.textSecondary}
+                                  />
+                                </View>
+                              </TouchableOpacity>
+                            )}
                           </View>
                         )}
                       </View>
@@ -857,291 +916,323 @@ export default function IndexScreen() {
                     </View>
                   )}
 
-                  <View style={styles.statsRow}>
-                    <StatCard
-                      theme={theme}
-                      number={estatisticas.avaliacao_media}
-                      label="Avaliação média"
-                      icon={<Text style={styles.starIcon}>★</Text>}
-                    />
-                    <StatCard
-                      theme={theme}
-                      number={estatisticas.total_contratacoes}
-                      label="Contratações"
-                      icon={<Music size={18} color={theme.accent} />}
-                    />
-                    <StatCard
-                      theme={theme}
-                      number={estatisticas.total_favoritos}
-                      label="Favoritos"
-                      icon={<Heart size={18} color="#E05A10" />}
-                    />
-                  </View>
+                  {/* Renderização condicional: Estatísticas e Portfólio APARECEM APENAS PARA ARTISTAS */}
+                  {isArtista ? (
+                    <>
+                      <View style={styles.statsRow}>
+                        <StatCard
+                          theme={theme}
+                          number={estatisticas.avaliacao_media}
+                          label="Avaliação média"
+                          icon={<Text style={styles.starIcon}>★</Text>}
+                        />
+                        <StatCard
+                          theme={theme}
+                          number={estatisticas.total_contratacoes}
+                          label="Contratações"
+                          icon={<Music size={18} color={theme.accent} />}
+                        />
+                        <StatCard
+                          theme={theme}
+                          number={estatisticas.total_favoritos}
+                          label="Favoritos"
+                          icon={<Heart size={18} color="#E05A10" />}
+                        />
+                      </View>
 
-                  <View style={styles.sectionHeader}>
-                    <View>
-                      <Text style={styles.sectionTitle}>Portfólio</Text>
-                      <Text style={styles.sectionSubtitle}>
-                        Mostre seus trabalhos e apresentações
-                      </Text>
-                    </View>
-                    <View style={styles.portfolioActions}>
-                      <TouchableOpacity
-                        style={styles.addPortfolioButton}
-                        activeOpacity={0.8}
-                        onPress={openPortfolioModal}
-                      >
-                        <Text style={styles.addIcon}>+</Text>
-                        <Text style={styles.addPortfolioText}>Adicionar</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.addVideoButton}
-                        activeOpacity={0.8}
-                        onPress={openVideoModal}
-                      >
-                        <Text style={styles.addVideoIcon}>+</Text>
-                        <Text style={styles.addVideoText}>Adicionar vídeo</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  {portfolioItems.map((item, index) => {
-                    const isImage = item.file?.mimeType?.startsWith("image/");
-                    const isVideo = item.file?.mimeType?.startsWith("video/");
-                    return (
-                      <View
-                        key={item.id}
-                        style={[
-                          styles.portfolioCard,
-                          item.isFeatured && styles.portfolioCardFeatured,
-                        ]}
-                      >
-                        {item.isFeatured && (
-                          <View style={styles.featuredBadge}>
-                            <Star
-                              size={10}
-                              color="#FFFFFF"
-                              fill="#FFFFFF"
-                              style={{ marginRight: 3 }}
-                            />
-                            <Text style={styles.featuredBadgeText}>Destaque</Text>
-                          </View>
-                        )}
-
-                        <View style={styles.portfolioPreview}>
-                          {isImage || isVideo ? (
-                            <TouchableOpacity
-                              style={{
-                                flex: 1,
-                                width: "100%",
-                                position: "relative",
-                              }}
-                              activeOpacity={0.85}
-                              onPress={() =>
-                                openViewer(
-                                  item.file.uri,
-                                  isVideo ? "video" : "image",
-                                )
-                              }
-                            >
-                              {isImage ? (
-                                <Image
-                                  source={{ uri: item.file.uri }}
-                                  style={styles.fullCoverImage}
-                                />
-                              ) : (
-                                <View
-                                  style={[
-                                    styles.fullCoverImage,
-                                    {
-                                      backgroundColor: "#33231D",
-                                      justifyContent: "center",
-                                      alignItems: "center",
-                                    },
-                                  ]}
-                                >
-                                  <Text style={{ fontSize: 24, color: "#fff" }}>
-                                    ▶
-                                  </Text>
-                                </View>
-                              )}
-                            </TouchableOpacity>
-                          ) : (
-                            <>
-                              <Music size={38} color={theme.accent} />
-                              <Text style={styles.portfolioPreviewTitle}>
-                                Portfólio
-                              </Text>
-                              <Text style={styles.portfolioPreviewText}>
-                                Trabalho
-                              </Text>
-                            </>
-                          )}
-                        </View>
-
-                        <View style={styles.portfolioInfo}>
-                          <Text style={styles.portfolioTitle}>{item.name}</Text>
-                          <Text style={styles.portfolioDescription}>
-                            {item.description}
+                      <View style={styles.sectionHeader}>
+                        <View>
+                          <Text style={styles.sectionTitle}>Portfólio</Text>
+                          <Text style={styles.sectionSubtitle}>
+                            Mostre seus trabalhos e apresentações
                           </Text>
-                          {item.file?.name && !isImage && !isVideo && (
-                            <Text style={styles.portfolioFileName}>
-                              📎 {item.file.name}
-                            </Text>
-                          )}
                         </View>
-
-                        <View style={styles.portfolioCardActions}>
+                        <View style={styles.portfolioActions}>
                           <TouchableOpacity
-                            style={[
-                              styles.cardActionBtn,
-                              item.isFeatured && styles.cardActionBtnActive,
-                            ]}
-                            onPress={() => handleToggleFeaturePortfolio(item.id)}
+                            style={styles.addPortfolioButton}
+                            activeOpacity={0.8}
+                            onPress={openPortfolioModal}
                           >
-                            <Star
-                              size={14}
-                              color={
-                                item.isFeatured ? "#FFFFFF" : theme.textSecondary
-                              }
-                              fill={item.isFeatured ? "#FFFFFF" : "none"}
-                            />
+                            <Text style={styles.addIcon}>+</Text>
+                            <Text style={styles.addPortfolioText}>Adicionar</Text>
                           </TouchableOpacity>
-
-                          {index > 0 && (
-                            <TouchableOpacity
-                              style={styles.cardActionBtn}
-                              onPress={() => handleMovePortfolioItem(index, "up")}
-                            >
-                              <ArrowUp size={14} color={theme.textSecondary} />
-                            </TouchableOpacity>
-                          )}
-
-                          {index < portfolioItems.length - 1 && (
-                            <TouchableOpacity
-                              style={styles.cardActionBtn}
-                              onPress={() => handleMovePortfolioItem(index, "down")}
-                            >
-                              <ArrowDown size={14} color={theme.textSecondary} />
-                            </TouchableOpacity>
-                          )}
-
                           <TouchableOpacity
-                            style={[styles.cardActionBtn, styles.cardActionDelete]}
-                            onPress={() => handleDeletePortfolioItem(item.id)}
+                            style={styles.addVideoButton}
+                            activeOpacity={0.8}
+                            onPress={openVideoModal}
                           >
-                            <Trash2 size={14} color="#E05A10" />
+                            <Text style={styles.addVideoIcon}>+</Text>
+                            <Text style={styles.addVideoText}>Adicionar vídeo</Text>
                           </TouchableOpacity>
                         </View>
                       </View>
-                    );
-                  })}
 
-                  <View style={styles.videoGrid}>
-                    {videoItems.map((video, index) => {
-                      let IconComponent = Music;
-                      if (video.type === "headphones") IconComponent = Headphones;
-                      if (video.type === "mic") IconComponent = Mic;
-
-                      return (
-                        <View
-                          key={video.id}
-                          style={[
-                            styles.videoCard,
-                            video.isFeatured && styles.videoCardFeatured,
-                          ]}
-                        >
-                          {video.isFeatured && (
-                            <View style={styles.featuredBadgeVideo}>
-                              <Star
-                                size={9}
-                                color="#FFFFFF"
-                                fill="#FFFFFF"
-                                style={{ marginRight: 2 }}
-                              />
-                              <Text style={styles.featuredBadgeText}>Destaque</Text>
-                            </View>
-                          )}
-
-                          <View style={styles.videoCardActions}>
-                            <TouchableOpacity
-                              style={[
-                                styles.cardActionBtn,
-                                video.isFeatured && styles.cardActionBtnActive,
-                              ]}
-                              onPress={() => handleToggleFeatureVideo(video.id)}
-                            >
-                              <Star
-                                size={13}
-                                color={
-                                  video.isFeatured ? "#FFFFFF" : theme.textSecondary
-                                }
-                                fill={video.isFeatured ? "#FFFFFF" : "none"}
-                              />
-                            </TouchableOpacity>
-
-                            {index > 0 && (
-                              <TouchableOpacity
-                                style={styles.cardActionBtn}
-                                onPress={() => handleMoveVideoItem(index, "up")}
-                              >
-                                <ArrowUp size={13} color={theme.textSecondary} />
-                              </TouchableOpacity>
-                            )}
-
-                            {index < videoItems.length - 1 && (
-                              <TouchableOpacity
-                                style={styles.cardActionBtn}
-                                onPress={() => handleMoveVideoItem(index, "down")}
-                              >
-                                <ArrowDown size={13} color={theme.textSecondary} />
-                              </TouchableOpacity>
-                            )}
-
-                            <TouchableOpacity
-                              style={[
-                                styles.cardActionBtn,
-                                styles.cardActionDelete,
-                              ]}
-                              onPress={() => handleDeleteVideoItem(video.id)}
-                            >
-                              <Trash2 size={13} color="#E05A10" />
-                            </TouchableOpacity>
-                          </View>
-
-                          <TouchableOpacity
-                            style={styles.videoThumbnail}
-                            activeOpacity={0.85}
-                            onPress={() => {
-                              if (video.file?.uri)
-                                openViewer(video.file.uri, "video");
-                            }}
-                          >
-                            {video.cover?.uri ? (
-                              <Image
-                                source={{ uri: video.cover.uri }}
-                                style={styles.fullCoverImage}
-                              />
-                            ) : (
-                              <View style={styles.videoIconCircle}>
-                                <IconComponent size={25} color="#FFFFFF" />
-                              </View>
-                            )}
-                            <View style={styles.playButton}>
-                              <Text style={styles.playText}>▶</Text>
-                            </View>
-                          </TouchableOpacity>
-
-                          <View style={styles.videoInfo}>
-                            <Text style={styles.videoTitle}>{video.title}</Text>
-                            <Text style={styles.videoSubtitle}>
-                              {video.subtitle}
-                            </Text>
-                          </View>
+                      {portfolioItems.length === 0 ? (
+                        <View style={styles.emptyPortfolioCard}>
+                          <Music size={24} color={theme.textSecondary} style={{ marginBottom: 6 }} />
+                          <Text style={styles.emptyPortfolioText}>Ainda não há nada no portfólio.</Text>
+                          <Text style={styles.emptyPortfolioSubText}>Adicione trabalhos ou mídias para exibi-los aqui.</Text>
                         </View>
-                      );
-                    })}
-                  </View>
+                      ) : (
+                        portfolioItems.map((item, index) => {
+                          const isImage = item.file?.mimeType?.startsWith("image/");
+                          const isVideo = item.file?.mimeType?.startsWith("video/");
+                          return (
+                            <View
+                              key={item.id}
+                              style={[
+                                styles.portfolioCard,
+                                item.isFeatured && styles.portfolioCardFeatured,
+                              ]}
+                            >
+                              {item.isFeatured && (
+                                <View style={styles.featuredBadge}>
+                                  <Star
+                                    size={10}
+                                    color="#FFFFFF"
+                                    fill="#FFFFFF"
+                                    style={{ marginRight: 3 }}
+                                  />
+                                  <Text style={styles.featuredBadgeText}>Destaque</Text>
+                                </View>
+                              )}
+
+                              <View style={styles.portfolioPreview}>
+                                {isImage || isVideo ? (
+                                  <TouchableOpacity
+                                    style={{
+                                      flex: 1,
+                                      width: "100%",
+                                      position: "relative",
+                                    }}
+                                    activeOpacity={0.85}
+                                    onPress={() =>
+                                      openViewer(
+                                        item.file.uri,
+                                        isVideo ? "video" : "image",
+                                      )
+                                    }
+                                  >
+                                    {isImage ? (
+                                      <Image
+                                        source={{ uri: item.file.uri }}
+                                        style={styles.fullCoverImage}
+                                      />
+                                    ) : (
+                                      <View
+                                        style={[
+                                          styles.fullCoverImage,
+                                          {
+                                            backgroundColor: "#33231D",
+                                            justifyContent: "center",
+                                            alignItems: "center",
+                                          },
+                                        ]}
+                                      >
+                                        <Text style={{ fontSize: 24, color: "#fff" }}>
+                                          ▶
+                                        </Text>
+                                      </View>
+                                    )}
+                                  </TouchableOpacity>
+                                ) : (
+                                  <>
+                                    <Music size={38} color={theme.accent} />
+                                    <Text style={styles.portfolioPreviewTitle}>
+                                      Portfólio
+                                    </Text>
+                                    <Text style={styles.portfolioPreviewText}>
+                                      Trabalho
+                                    </Text>
+                                  </>
+                                )}
+                              </View>
+
+                              <View style={styles.portfolioInfo}>
+                                <Text style={styles.portfolioTitle}>{item.name}</Text>
+                                <Text style={styles.portfolioDescription}>
+                                  {item.description}
+                                </Text>
+                                {item.file?.name && !isImage && !isVideo && (
+                                  <Text style={styles.portfolioFileName}>
+                                    📎 {item.file.name}
+                                  </Text>
+                                )}
+                              </View>
+
+                              <View style={styles.portfolioCardActions}>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.cardActionBtn,
+                                    item.isFeatured && styles.cardActionBtnActive,
+                                  ]}
+                                  onPress={() => handleToggleFeaturePortfolio(item.id)}
+                                >
+                                  <Star
+                                    size={14}
+                                    color={
+                                      item.isFeatured ? "#FFFFFF" : theme.textSecondary
+                                    }
+                                    fill={item.isFeatured ? "#FFFFFF" : "none"}
+                                  />
+                                </TouchableOpacity>
+
+                                {index > 0 && (
+                                  <TouchableOpacity
+                                    style={styles.cardActionBtn}
+                                    onPress={() => handleMovePortfolioItem(index, "up")}
+                                  >
+                                    <ArrowUp size={14} color={theme.textSecondary} />
+                                  </TouchableOpacity>
+                                )}
+
+                                {index < portfolioItems.length - 1 && (
+                                  <TouchableOpacity
+                                    style={styles.cardActionBtn}
+                                    onPress={() => handleMovePortfolioItem(index, "down")}
+                                  >
+                                    <ArrowDown size={14} color={theme.textSecondary} />
+                                  </TouchableOpacity>
+                                )}
+
+                                <TouchableOpacity
+                                  style={[styles.cardActionBtn, styles.cardActionDelete]}
+                                  onPress={() => handleDeletePortfolioItem(item.id)}
+                                >
+                                  <Trash2 size={14} color="#E05A10" />
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          );
+                        })
+                      )}
+
+                      <View style={styles.videoGrid}>
+                        {videoItems.map((video, index) => {
+                          let IconComponent = Music;
+                          if (video.type === "headphones") IconComponent = Headphones;
+                          if (video.type === "mic") IconComponent = Mic;
+
+                          return (
+                            <View
+                              key={video.id}
+                              style={[
+                                styles.videoCard,
+                                video.isFeatured && styles.videoCardFeatured,
+                              ]}
+                            >
+                              {video.isFeatured && (
+                                <View style={styles.featuredBadgeVideo}>
+                                  <Star
+                                    size={9}
+                                    color="#FFFFFF"
+                                    fill="#FFFFFF"
+                                    style={{ marginRight: 2 }}
+                                  />
+                                  <Text style={styles.featuredBadgeText}>Destaque</Text>
+                                </View>
+                              )}
+
+                              <View style={styles.videoCardActions}>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.cardActionBtn,
+                                    video.isFeatured && styles.cardActionBtnActive,
+                                  ]}
+                                  onPress={() => handleToggleFeatureVideo(video.id)}
+                                >
+                                  <Star
+                                    size={13}
+                                    color={
+                                      video.isFeatured ? "#FFFFFF" : theme.textSecondary
+                                    }
+                                    fill={video.isFeatured ? "#FFFFFF" : "none"}
+                                  />
+                                </TouchableOpacity>
+
+                                {index > 0 && (
+                                  <TouchableOpacity
+                                    style={styles.cardActionBtn}
+                                    onPress={() => handleMoveVideoItem(index, "up")}
+                                  >
+                                    <ArrowUp size={13} color={theme.textSecondary} />
+                                  </TouchableOpacity>
+                                )}
+
+                                {index < videoItems.length - 1 && (
+                                  <TouchableOpacity
+                                    style={styles.cardActionBtn}
+                                    onPress={() => handleMoveVideoItem(index, "down")}
+                                  >
+                                    <ArrowDown size={13} color={theme.textSecondary} />
+                                  </TouchableOpacity>
+                                )}
+
+                                <TouchableOpacity
+                                  style={[
+                                    styles.cardActionBtn,
+                                    styles.cardActionDelete,
+                                  ]}
+                                  onPress={() => handleDeleteVideoItem(video.id)}
+                                >
+                                  <Trash2 size={13} color="#E05A10" />
+                                </TouchableOpacity>
+                              </View>
+
+                              <TouchableOpacity
+                                style={styles.videoThumbnail}
+                                activeOpacity={0.85}
+                                onPress={() => {
+                                  if (video.file?.uri)
+                                    openViewer(video.file.uri, "video");
+                                }}
+                              >
+                                {video.cover?.uri ? (
+                                  <Image
+                                    source={{ uri: video.cover.uri }}
+                                    style={styles.fullCoverImage}
+                                  />
+                                ) : (
+                                  <View style={styles.videoIconCircle}>
+                                    <IconComponent size={25} color="#FFFFFF" />
+                                  </View>
+                                )}
+                                <View style={styles.playButton}>
+                                  <Text style={styles.playText}>▶</Text>
+                                </View>
+                              </TouchableOpacity>
+
+                              <View style={styles.videoInfo}>
+                                <Text style={styles.videoTitle}>{video.title}</Text>
+                                <Text style={styles.videoSubtitle}>
+                                  {video.subtitle}
+                                </Text>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </>
+                  ) : (
+                    <View style={styles.notArtistCard}>
+                      <Music size={28} color={theme.accent} style={{ marginBottom: 8 }} />
+                      <Text style={styles.notArtistTitle}>Área exclusiva para Artistas</Text>
+                      <Text style={styles.notArtistSubtitle}>
+                        Você está logado com uma conta de contratante/cliente. Para exibir seu portfólio, avaliações e contratações aqui, torne-se um artista cadastrando seu perfil profissional.
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.becomeArtistButton}
+                        onPress={() => {
+                          setArtistNameInput("");
+                          setSelectedArtistCategory(FIXED_CATEGORIES[0]);
+                          setIsBecomingArtistModalVisible(true);
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.becomeArtistButtonText}>Quero ser um Artista</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </>
               )}
             </View>
@@ -1149,6 +1240,157 @@ export default function IndexScreen() {
         </View>
       </View>
 
+      {/* Modal de Confirmação para se tornar Artista com o mesmo padrão do Editar Perfil */}
+      <Modal
+        visible={isBecomingArtistModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsBecomingArtistModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Tornar-se Artista</Text>
+                <Text style={styles.modalSubtitle}>
+                  Informe seu nome artístico e escolha a categoria de atuação
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setIsBecomingArtistModalVisible(false)}
+              >
+                <X size={19} color={theme.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalContent}>
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Nome do Artista / Banda</Text>
+                <TextInput
+                  value={artistNameInput}
+                  onChangeText={setArtistNameInput}
+                  placeholder="Ex: João Cantor / Banda Sol"
+                  placeholderTextColor={theme.textSecondary}
+                  style={styles.formInput}
+                  autoFocus
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Categoria de Atuação</Text>
+                <TouchableOpacity
+                  style={[styles.formInput, { justifyContent: "center" }]}
+                  onPress={() => setIsArtistCategoryModalVisible(true)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.selectBoxRow}>
+                    <Music size={14} color={theme.accent} style={{ marginRight: 6 }} />
+                    <Text style={[styles.profileCategorySelectText, { flex: 1 }]}>
+                      {selectedArtistCategory}
+                    </Text>
+                    <ChevronDown size={16} color={theme.textSecondary} />
+                  </View>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setIsBecomingArtistModalVisible(false)}
+                disabled={isSubmittingArtist}
+              >
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalAddButton, isSubmittingArtist && styles.modalAddButtonDisabled]}
+                onPress={handleConfirmBecomeArtist}
+                disabled={isSubmittingArtist}
+              >
+                {isSubmittingArtist ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modalAddText}>Confirmar Cadastro</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Submodal para Selecionar a Categoria no Cadastro de Artista */}
+      <Modal
+        visible={isArtistCategoryModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsArtistCategoryModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Selecionar Categoria</Text>
+                <Text style={styles.modalSubtitle}>
+                  Escolha uma das opções predefinidas
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setIsArtistCategoryModalVisible(false)}
+              >
+                <X size={19} color={theme.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalContent}>
+              <ScrollView style={{ maxHeight: 250 }} showsVerticalScrollIndicator={false}>
+                {FIXED_CATEGORIES.map((cat) => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[
+                      styles.cityListItem,
+                      selectedArtistCategory === cat && {
+                        backgroundColor: theme.mainBg,
+                        borderColor: theme.accent,
+                        borderWidth: 1,
+                        borderRadius: 6,
+                      },
+                    ]}
+                    onPress={() => {
+                      setSelectedArtistCategory(cat);
+                      setIsArtistCategoryModalVisible(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.cityItemText,
+                        selectedArtistCategory === cat && {
+                          fontWeight: "700",
+                          color: theme.accent,
+                        },
+                      ]}
+                    >
+                      {cat}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setIsArtistCategoryModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Fechar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Demais Modais (Categoria do perfil, Cidade, Links, Visualizador, Portfólio, Vídeo) */}
       <Modal
         visible={isCategoryModalVisible}
         transparent
@@ -2043,6 +2285,27 @@ const getStyles = (theme: any) =>
       lineHeight: 15,
     },
     addVideoText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
+    emptyPortfolioCard: {
+      backgroundColor: theme.cardBg,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.borderColor,
+      padding: 24,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 22,
+    },
+    emptyPortfolioText: {
+      color: theme.textPrimary,
+      fontSize: 13,
+      fontWeight: "700",
+      marginTop: 4,
+    },
+    emptyPortfolioSubText: {
+      color: theme.textSecondary,
+      fontSize: 11,
+      marginTop: 2,
+    },
     portfolioCard: {
       backgroundColor: theme.cardBg,
       borderRadius: 12,
@@ -2186,6 +2449,20 @@ const getStyles = (theme: any) =>
     videoInfo: { padding: 11 },
     videoTitle: { color: theme.textPrimary, fontSize: 11, fontWeight: "700" },
     videoSubtitle: { color: theme.textSecondary, fontSize: 9, marginTop: 3 },
+    notArtistCard: {
+      backgroundColor: theme.cardBg,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.borderColor,
+      padding: 30,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: 10,
+    },
+    notArtistTitle: { color: theme.textPrimary, fontSize: 16, fontWeight: "700", marginBottom: 6 },
+    notArtistSubtitle: { color: theme.textSecondary, fontSize: 12, textAlign: "center", maxWidth: 450, lineHeight: 18, marginBottom: 20 },
+    becomeArtistButton: { backgroundColor: theme.accent, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8 },
+    becomeArtistButtonText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
     modalOverlay: {
       flex: 1,
       backgroundColor: "rgba(0, 0, 0, 0.55)",

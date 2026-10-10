@@ -10,29 +10,48 @@ import {
 } from 'react-native';
 import { Search, Bell, Settings, Sun, Moon, LogOut } from 'lucide-react-native';
 import { useTheme } from './context/ThemeContext';
-import { useProfile } from './context/ProfileContext';
-import { obterUsuario } from '../app/services/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
+
+const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export default function Header() {
   const [isMenuVisible, setIsMenuVisible] = useState(false);
   const [isAvatarMenuVisible, setIsAvatarMenuVisible] = useState(false);
   const [userName, setUserName] = useState('U');
+  const [profileImage, setProfileImage] = useState<string | null>(null);
 
   const { isLightMode, toggleTheme, theme } = useTheme();
-  const { profileImage } = useProfile();
   
   const styles = getStyles(theme);
 
+  // Busca isolada dos dados do usuário logado atual
   useEffect(() => {
-    async function fetchUser() {
-      const user = await obterUsuario();
-      if (user && user.email) {
-        setUserName(user.email.charAt(0).toUpperCase());
+    async function fetchHeaderUserData() {
+      try {
+        const token = await AsyncStorage.getItem('access_token');
+        if (!token) return;
+
+        const response = await fetch(`${URL_API}/api/perfis/me`, {
+          method: 'GET',
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+
+        const result = await response.json();
+        if (response.ok && result.dados) {
+          const dados = result.dados;
+          const nomeCompleto = dados.nome_completo || dados.email || 'U';
+          setUserName(nomeCompleto.charAt(0).toUpperCase());
+          setProfileImage(dados.foto_perfil || null);
+        }
+      } catch (error) {
+        console.error('Erro ao buscar dados do header:', error);
       }
     }
-    fetchUser();
+    fetchHeaderUserData();
   }, []);
 
   const handleLogout = async () => {
@@ -162,7 +181,7 @@ export default function Header() {
   );
 }
 
-const getStyles = (theme) => StyleSheet.create({
+const getStyles = (theme: any) => StyleSheet.create({
   header: {
     height: 70,
     flexDirection: 'row',
