@@ -679,6 +679,110 @@ def atualizar_perfil_logado(perfil: PerfilUpdate, current_user: dict = Depends(g
 # ARTISTA, MARKETPLACE, FINANCEIRO, AVALIAÇÕES E SUPORTE
 # ============================================================
 
+@app.get("/api/artistas", tags=["Artista"])
+def listar_artistas():
+    """Lista pública de artistas ativos para o Explorar e a pesquisa global."""
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT
+                pa.usuario_id AS id,
+                pa.usuario_id AS artista_id,
+                pa.nome_artistico,
+                pa.biografia,
+                pa.anos_experiencia,
+                pa.modalidade_atendimento,
+                pa.cidade_atendimento,
+                pa.estado_atendimento,
+                pa.nota_media,
+                pa.total_contratacoes,
+                p.foto_perfil_url,
+                p.cidade,
+                p.estado,
+                (SELECT COUNT(*) FROM avaliacoes av
+                 WHERE av.avaliado_id = pa.usuario_id) AS total_avaliacoes,
+                (SELECT COALESCE(AVG(av.nota), 0) FROM avaliacoes av
+                 WHERE av.avaliado_id = pa.usuario_id) AS avaliacao_media
+            FROM perfis_artista pa
+            INNER JOIN usuarios u ON u.id = pa.usuario_id
+            LEFT JOIN perfis p ON p.usuario_id = pa.usuario_id
+            WHERE u.status = 'ativo'
+              AND pa.aceitando_novas_solicitacoes = TRUE
+            ORDER BY pa.nota_media DESC, pa.criado_em DESC
+        """)
+        artistas = cursor.fetchall()
+
+        if not artistas:
+            return {"artistas": []}
+
+        ids = [artista["id"] for artista in artistas]
+        placeholders = ",".join(["%s"] * len(ids))
+
+        cursor.execute(f"""
+            SELECT ac.artista_id, c.nome
+            FROM artista_categorias ac
+            INNER JOIN categorias c ON c.id = ac.categoria_id
+            WHERE ac.artista_id IN ({placeholders}) AND c.ativo = TRUE
+            ORDER BY c.nome
+        """, tuple(ids))
+        categorias_por_artista = {}
+        for row in cursor.fetchall():
+            categorias_por_artista.setdefault(row["artista_id"], []).append(row["nome"])
+
+        cursor.execute(f"""
+            SELECT id, artista_id, titulo, descricao, preco_min, preco_max,
+                   prazo_estimado_dias, modalidade
+            FROM servicos
+            WHERE artista_id IN ({placeholders}) AND ativo = TRUE
+            ORDER BY criado_em DESC
+        """, tuple(ids))
+        servicos_por_artista = {}
+        for row in cursor.fetchall():
+            servicos_por_artista.setdefault(row["artista_id"], []).append({
+                "id": row["id"],
+                "titulo": row["titulo"],
+                "descricao": row["descricao"],
+                "preco_min": float(row["preco_min"]) if row["preco_min"] is not None else None,
+                "preco_max": float(row["preco_max"]) if row["preco_max"] is not None else None,
+                "prazo_estimado_dias": row["prazo_estimado_dias"],
+                "modalidade": row["modalidade"],
+            })
+
+        for artista in artistas:
+            artista_id = artista["id"]
+            artista["categorias"] = categorias_por_artista.get(artista_id, [])
+            artista["servicos"] = servicos_por_artista.get(artista_id, [])
+            artista["instrumentos"] = " ".join(
+                item["titulo"] + " " + (item["descricao"] or "")
+                for item in artista["servicos"]
+            )
+            artista["estilo_musical"] = " ".join(artista["categorias"])
+            artista["nota_media"] = float(artista["nota_media"] or 0)
+            artista["avaliacao_media"] = float(artista["avaliacao_media"] or 0)
+            artista["total_avaliacoes"] = int(artista["total_avaliacoes"] or 0)
+            artista["total_contratacoes"] = int(artista["total_contratacoes"] or 0)
+
+        return {"artistas": artistas}
+
+    except Exception as err:
+        print("--- ERRO EM /api/artistas (GET) ---")
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível carregar os artistas neste momento."
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if conexao:
+            conexao.close()
+
+
+
 @app.post("/api/artistas", tags=["Artista"])
 def tornar_se_artista(dados_artista: PerfilArtistaCreate, current_user: dict = Depends(get_usuario_atual)):
     usuario_id = current_user["id"]

@@ -1,0 +1,28 @@
+Portal da Arte — API corrigida
+
+Alterações:
+- Adicionado GET /api/artistas, público, que lista artistas ativos a partir das tabelas usuarios, perfis, perfis_artista, artista_categorias, categorias, servicos e avaliacoes.
+- A resposta inclui categorias, serviços, preço, foto_perfil_url, nota e quantidade de avaliações para o Explorar.
+- Adicionado seed_artistas_demo.py para criar/atualizar quatro perfis demonstrativos. O script usa hash bcrypt compatível com a função de senha da API.
+
+Como aplicar:
+1. Faça uma cópia de segurança do seu main.py atual.
+2. Substitua python-api/main.py pelo main.py deste pacote.
+3. Coloque seed_artistas_demo.py na mesma pasta de main.py.
+4. Confirme que o .env existente está nessa pasta e contém DB_HOST, DB_USER, DB_PASSWORD e DB_NAME.
+5. Com as dependências do backend instaladas e o banco criado pelo database/MySQL.sql, execute:
+   python seed_artistas_demo.py
+6. Inicie/reinicie a API e teste GET http://127.0.0.1:8000/api/artistas. A documentação interativa fica em http://127.0.0.1:8000/docs.
+
+Contas de demonstração (somente desenvolvimento):
+- demo.cantora@example.com
+- demo.forro@example.com
+- demo.fotografia@example.com
+- demo.artesvisuais@example.com
+Senha comum: PortalArteDemo123!
+
+Importante:
+- O arquivo .env não está incluído no pacote para não expor credenciais.
+- Os perfis demonstrativos não têm imagens definidas; foto_perfil_url será null até que uma foto real seja salva.
+- A API retorna serviços e categorias para permitir pesquisar por nome, estilo/categoria, instrumento ou termos presentes na descrição dos serviços.
+- Teste em ambiente de desenvolvimento antes de usar em produção.
