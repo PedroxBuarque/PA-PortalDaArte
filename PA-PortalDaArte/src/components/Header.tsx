@@ -13,13 +13,10 @@ import { useTheme } from './context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 
-const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
-
 export default function Header() {
   const [isMenuVisible, setIsMenuVisible] = useState(false);
   const [isAvatarMenuVisible, setIsAvatarMenuVisible] = useState(false);
   const [userName, setUserName] = useState('U');
-  const [profileImage, setProfileImage] = useState<string | null>(null);
 
   const { isLightMode, toggleTheme, theme } = useTheme();
   
@@ -54,6 +51,28 @@ export default function Header() {
     fetchHeaderUserData();
   }, []);
 
+  // Atualiza os parâmetros da tela atual sem navegar/remontar a tela
+  // a cada tecla, para manter o foco e permitir digitar frases completas.
+  const handleSearchChange = (text: string) => {
+    setSearchText(text);
+
+    if (pathname.replace(/\/$/, '') === '/pages/explorar/explorar') {
+      router.setParams({ search: text });
+    }
+  };
+
+  const handleSearch = () => {
+    // Ao pressionar Enter fora do Explorar, abre a tela com o termo pesquisado.
+    if (pathname.replace(/\/$/, '') !== '/pages/explorar/explorar') {
+      router.push({
+        pathname: '/pages/explorar/explorar',
+        params: { search: searchText.trim() },
+      });
+    } else {
+      router.setParams({ search: searchText });
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await AsyncStorage.removeItem('access_token');
@@ -73,6 +92,11 @@ export default function Header() {
           style={styles.searchInput}
           placeholder="Busque por artista, estilo musical ou instrumentos..."
           placeholderTextColor={theme.textSecondary}
+          value={searchText}
+          onChangeText={handleSearchChange}
+          onSubmitEditing={handleSearch}
+          returnKeyType="search"
+          accessibilityLabel="Buscar artistas por nome, estilo musical ou instrumento"
         />
       </View>
 

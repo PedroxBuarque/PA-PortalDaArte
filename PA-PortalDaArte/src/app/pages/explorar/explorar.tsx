@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
+  Image,
   Modal,
   PanResponder,
   Platform,
@@ -17,6 +18,60 @@ import {
 import Header from "../../../components/Header";
 import Sidebar from "../../../components/Sidebar";
 import { useTheme } from "../../../components/context/ThemeContext";
+import { useLocalSearchParams } from "expo-router";
+
+const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+const firstValue = (...values: any[]) => values.find((value) => value !== undefined && value !== null && value !== "" && !(Array.isArray(value) && value.length === 0));
+
+const toText = (value: any): string => {
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map(toText).filter(Boolean).join(" ");
+  if (value && typeof value === "object") return String(firstValue(value.nome, value.name, value.titulo, value.instrumento, value.estilo, value.descricao, value.description, ""));
+  return "";
+};
+
+const normalizeArtist = (raw: any, index: number): Artist => {
+  const profile = firstValue(raw.perfil, raw.profile, {});
+  const categories = firstValue(raw.categorias, raw.categories, raw.categoria, raw.category, "");
+  const services = firstValue(raw.servicos, raw.services, raw.instrumentos, raw.instruments, "");
+  const categoryText = toText(categories);
+  const serviceText = toText(services);
+  const name = String(firstValue(raw.nome_artistico, raw.nome, raw.name, raw.nome_completo, raw.name_artistico, "Artista"));
+  const style = String(firstValue(raw.estilo_musical, raw.estilo, raw.style, raw.instrumento, raw.instrument, serviceText, categoryText, "Artista independente"));
+  const categorySource = categoryText.toLowerCase();
+  const category = /banda/.test(categorySource) ? "Bandas"
+    : /foto/.test(categorySource) ? "Fotógrafos"
+    : /pint|artes visuais|ilustra|desenh/.test(categorySource) ? "Pintores"
+    : /dan[cç]|core[oó]g/.test(categorySource) ? "Dançarinos"
+    : /m[uú]sic|cant|instrument|forr[oó]|samba|mpb|rock|dj/.test((categoryText + " " + style).toLowerCase()) ? "Músicos"
+    : "Todos os artistas";
+  const searchableText = [name, categoryText, serviceText, style, raw.biografia, raw.bio, raw.instrumentos, raw.instruments, raw.descricao, raw.description]
+    .map(toText).join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const serviceRecords = Array.isArray(services) ? services : [];
+  const servicePrice = serviceRecords
+    .map((service: any) => firstValue(service.preco_min, service.preco, service.price, service.valor_hora))
+    .find((value: any) => value !== undefined && value !== null && value !== "");
+  const rawPrice = firstValue(raw.preco_min, raw.preco, raw.price, raw.valor_hora, raw.valor, servicePrice, 0);
+  const price = Number(rawPrice) || 0;
+  const rawRating = firstValue(raw.nota_media, raw.avaliacao_media, raw.rating, 0);
+  const rating = Number(rawRating) || 0;
+  return {
+    id: Number(firstValue(raw.id, raw.usuario_id, raw.artista_id, index + 1)) || index + 1,
+    name,
+    category,
+    style,
+    emoji: category === "Bandas" ? "🎸" : category === "Fotógrafos" ? "📷" : category === "Pintores" ? "🎨" : category === "Dançarinos" ? "💃" : "🎵",
+    avatarColor: "#8B7355",
+    rating,
+    reviews: Number(firstValue(raw.total_avaliacoes, raw.reviews, raw.avaliacoes, 0)) || 0,
+    price,
+    distanceKm: Number(firstValue(raw.distanceKm, raw.distancia_km, raw.distancia, 0)) || 0,
+    favorite: false,
+    avatarUrl: firstValue(raw.foto_perfil_url, raw.foto_url, raw.avatar_url, raw.profile_image, profile.foto_perfil_url, profile.foto_url, profile.avatar_url, null),
+    searchableText,
+  };
+};
 
 type Artist = {
   id: number;
@@ -30,348 +85,9 @@ type Artist = {
   price: number;
   distanceKm: number;
   favorite?: boolean;
+  avatarUrl?: string | null;
+  searchableText: string;
 };
-
-const ARTISTS: Artist[] = [
-  {
-    id: 1,
-    name: "Lucas Andrade",
-    category: "Músicos",
-    style: "Violão e Voz",
-    emoji: "🎸",
-    avatarColor: "#D1B48C",
-    rating: 4.8,
-    reviews: 96,
-    price: 180,
-    distanceKm: 4,
-    favorite: false,
-  },
-  {
-    id: 2,
-    name: "Banda Vereda",
-    category: "Bandas",
-    style: "Forró",
-    emoji: "🪗",
-    avatarColor: "#8B5A2B",
-    rating: 4.9,
-    reviews: 210,
-    price: 950,
-    distanceKm: 8,
-    favorite: true,
-  },
-  {
-    id: 3,
-    name: "DJ Marina",
-    category: "Músicos",
-    style: "Eletrônica",
-    emoji: "🎧",
-    avatarColor: "#4A3C31",
-    rating: 4.7,
-    reviews: 63,
-    price: 650,
-    distanceKm: 12,
-    favorite: false,
-  },
-  {
-    id: 4,
-    name: "Trio Nordestino",
-    category: "Bandas",
-    style: "Forró Pé de Serra",
-    emoji: "🥁",
-    avatarColor: "#A0522D",
-    rating: 4.8,
-    reviews: 88,
-    price: 700,
-    distanceKm: 18,
-    favorite: false,
-  },
-  {
-    id: 5,
-    name: "Juliana Diniz",
-    category: "Músicos",
-    style: "MPB",
-    emoji: "🎤",
-    avatarColor: "#CD853F",
-    rating: 4.9,
-    reviews: 128,
-    price: 500,
-    distanceKm: 6,
-    favorite: false,
-  },
-  {
-    id: 6,
-    name: "Samba do Morro",
-    category: "Bandas",
-    style: "Samba",
-    emoji: "🪘",
-    avatarColor: "#556B2F",
-    rating: 4.6,
-    reviews: 44,
-    price: 850,
-    distanceKm: 25,
-    favorite: false,
-  },
-  {
-    id: 7,
-    name: "Ana Beatriz",
-    category: "Músicos",
-    style: "Voz e Teclado",
-    emoji: "🎹",
-    avatarColor: "#9B7EDE",
-    rating: 4.8,
-    reviews: 72,
-    price: 220,
-    distanceKm: 10,
-    favorite: false,
-  },
-  {
-    id: 8,
-    name: "Forró da Serra",
-    category: "Bandas",
-    style: "Forró",
-    emoji: "🪗",
-    avatarColor: "#C47A44",
-    rating: 4.7,
-    reviews: 115,
-    price: 1100,
-    distanceKm: 32,
-    favorite: false,
-  },
-  {
-    id: 9,
-    name: "Rafael Lima",
-    category: "Fotógrafos",
-    style: "Eventos",
-    emoji: "📷",
-    avatarColor: "#64748B",
-    rating: 4.9,
-    reviews: 91,
-    price: 300,
-    distanceKm: 7,
-    favorite: false,
-  },
-  {
-    id: 10,
-    name: "Ateliê Sol",
-    category: "Pintores",
-    style: "Arte contemporânea",
-    emoji: "🎨",
-    avatarColor: "#B96E75",
-    rating: 4.6,
-    reviews: 37,
-    price: 420,
-    distanceKm: 14,
-    favorite: false,
-  },
-  {
-    id: 11,
-    name: "Movimento Livre",
-    category: "Dançarinos",
-    style: "Dança regional",
-    emoji: "💃",
-    avatarColor: "#D977A8",
-    rating: 4.8,
-    reviews: 55,
-    price: 600,
-    distanceKm: 21,
-    favorite: false,
-  },
-  {
-    id: 12,
-    name: "Pedro Santos",
-    category: "Músicos",
-    style: "Saxofone",
-    emoji: "🎷",
-    avatarColor: "#475569",
-    rating: 4.5,
-    reviews: 31,
-    price: 260,
-    distanceKm: 9,
-    favorite: false,
-  },
-  {
-    id: 13,
-    name: "Banda Mandacaru",
-    category: "Bandas",
-    style: "Xote",
-    emoji: "🎻",
-    avatarColor: "#A16207",
-    rating: 4.9,
-    reviews: 142,
-    price: 1250,
-    distanceKm: 42,
-    favorite: false,
-  },
-  {
-    id: 14,
-    name: "Camila Rocha",
-    category: "Fotógrafos",
-    style: "Retratos",
-    emoji: "📸",
-    avatarColor: "#8B718B",
-    rating: 4.7,
-    reviews: 64,
-    price: 280,
-    distanceKm: 16,
-    favorite: false,
-  },
-  {
-    id: 15,
-    name: "Cores do Agreste",
-    category: "Pintores",
-    style: "Pintura em tela",
-    emoji: "🖌️",
-    avatarColor: "#B45309",
-    rating: 4.8,
-    reviews: 28,
-    price: 900,
-    distanceKm: 48,
-    favorite: false,
-  },
-  {
-    id: 16,
-    name: "Companhia Ginga",
-    category: "Dançarinos",
-    style: "Dança urbana",
-    emoji: "🕺",
-    avatarColor: "#7C3AED",
-    rating: 4.7,
-    reviews: 46,
-    price: 450,
-    distanceKm: 35,
-    favorite: false,
-  },
-  {
-    id: 17,
-    name: "João do Acordeon",
-    category: "Músicos",
-    style: "Acordeon",
-    emoji: "🪗",
-    avatarColor: "#92400E",
-    rating: 4.9,
-    reviews: 173,
-    price: 380,
-    distanceKm: 5,
-    favorite: false,
-  },
-  {
-    id: 18,
-    name: "Luz & Som",
-    category: "Bandas",
-    style: "Pop",
-    emoji: "🎤",
-    avatarColor: "#0F766E",
-    rating: 4.5,
-    reviews: 52,
-    price: 1450,
-    distanceKm: 55,
-    favorite: false,
-  },
-  {
-    id: 19,
-    name: "Marina Alves",
-    category: "Fotógrafos",
-    style: "Casamentos",
-    emoji: "📷",
-    avatarColor: "#6B7280",
-    rating: 4.9,
-    reviews: 103,
-    price: 750,
-    distanceKm: 19,
-    favorite: false,
-  },
-  {
-    id: 20,
-    name: "Estúdio Aurora",
-    category: "Pintores",
-    style: "Ilustração",
-    emoji: "🌅",
-    avatarColor: "#C2410C",
-    rating: 4.6,
-    reviews: 22,
-    price: 350,
-    distanceKm: 27,
-    favorite: false,
-  },
-  {
-    id: 21,
-    name: "Passo a Passo",
-    category: "Dançarinos",
-    style: "Forró",
-    emoji: "💃",
-    avatarColor: "#BE185D",
-    rating: 4.8,
-    reviews: 61,
-    price: 520,
-    distanceKm: 11,
-    favorite: false,
-  },
-  {
-    id: 22,
-    name: "Bruno Vieira",
-    category: "Músicos",
-    style: "Percussão",
-    emoji: "🥁",
-    avatarColor: "#57534E",
-    rating: 4.4,
-    reviews: 18,
-    price: 200,
-    distanceKm: 63,
-    favorite: false,
-  },
-  {
-    id: 23,
-    name: "Banda Horizonte",
-    category: "Bandas",
-    style: "MPB",
-    emoji: "🎶",
-    avatarColor: "#0369A1",
-    rating: 4.7,
-    reviews: 97,
-    price: 980,
-    distanceKm: 74,
-    favorite: false,
-  },
-  {
-    id: 24,
-    name: "Nina Costa",
-    category: "Fotógrafos",
-    style: "Shows",
-    emoji: "📸",
-    avatarColor: "#7C2D12",
-    rating: 4.8,
-    reviews: 49,
-    price: 320,
-    distanceKm: 29,
-    favorite: false,
-  },
-  {
-    id: 25,
-    name: "Traço Vivo",
-    category: "Pintores",
-    style: "Muralismo",
-    emoji: "🎨",
-    avatarColor: "#166534",
-    rating: 4.5,
-    reviews: 19,
-    price: 1200,
-    distanceKm: 82,
-    favorite: false,
-  },
-  {
-    id: 26,
-    name: "Corpo em Cena",
-    category: "Dançarinos",
-    style: "Dança contemporânea",
-    emoji: "🩰",
-    avatarColor: "#9D174D",
-    rating: 4.9,
-    reviews: 76,
-    price: 800,
-    distanceKm: 67,
-    favorite: false,
-  },
-];
 
 const SORT_OPTIONS = [
   { id: "rating", label: "Mais bem avaliados" },
@@ -399,7 +115,12 @@ export default function ExplorarScreen() {
   const styles = getStyles(theme) as any;
   const { width } = useWindowDimensions();
   const isMobile = width < 900; // Define se é tela de celular/tablet pequeno
+  const params = useLocalSearchParams<{ search?: string }>();
+  const searchQuery = (Array.isArray(params.search) ? params.search[0] : params.search || "").trim();
 
+  const [artists, setArtists] = useState<Artist[]>([]);
+  const [loadingArtists, setLoadingArtists] = useState(true);
+  const [artistsError, setArtistsError] = useState("");
   const [category, setCategory] = useState("Todos os artistas");
   const [minPrice, setMinPrice] = useState("0");
   const [maxPrice, setMaxPrice] = useState("5000");
@@ -411,6 +132,36 @@ export default function ExplorarScreen() {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [visibleCount, setVisibleCount] = useState(6);
   const [favorites, setFavorites] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    let active = true;
+    const loadArtists = async () => {
+      setLoadingArtists(true);
+      setArtistsError("");
+      try {
+        // Endpoint público esperado: GET /api/artistas retorna os perfis ativos do banco.
+        const response = await fetch(`${URL_API}/api/artistas`);
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.detail || "Não foi possível carregar os artistas.");
+        }
+        const rows = Array.isArray(payload)
+          ? payload
+          : firstValue(payload.artistas, payload.items, payload.results, payload.data, []);
+        if (!Array.isArray(rows)) throw new Error("A API retornou uma lista de artistas inválida.");
+        if (active) setArtists(rows.map(normalizeArtist));
+      } catch (error: any) {
+        if (active) {
+          setArtists([]);
+          setArtistsError(error?.message || "Falha ao conectar com a API de artistas.");
+        }
+      } finally {
+        if (active) setLoadingArtists(false);
+      }
+    };
+    loadArtists();
+    return () => { active = false; };
+  }, []);
 
   const numericMin = Math.max(0, Number(minPrice.replace(/\D/g, "")) || 0);
   const numericMax = Math.min(
@@ -460,8 +211,11 @@ export default function ExplorarScreen() {
     }),
   ).current;
 
+  // RECOMENDAÇÃO SIMULADA APLICADA AQUI
   const filteredArtists = useMemo(() => {
-    const result = ARTISTS.filter((artist) => {
+    const normalizedQuery = searchQuery.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const result = artists.filter((artist) => {
+      const matchesSearch = !normalizedQuery || artist.searchableText.includes(normalizedQuery);
       const matchesCategory =
         category === "Todos os artistas" || artist.category === category;
       const matchesPrice =
@@ -469,7 +223,7 @@ export default function ExplorarScreen() {
       const matchesRating = ratingFilter === 0 || artist.rating >= ratingFilter;
       const matchesDistance = artist.distanceKm <= distance;
       return (
-        matchesCategory && matchesPrice && matchesRating && matchesDistance
+        matchesSearch && matchesCategory && matchesPrice && matchesRating && matchesDistance
       );
     });
 
@@ -477,14 +231,17 @@ export default function ExplorarScreen() {
       if (sort === "priceAsc") return a.price - b.price;
       if (sort === "priceDesc") return b.price - a.price;
       if (sort === "distance") return a.distanceKm - b.distanceKm;
-      return b.rating - a.rating || b.reviews - a.reviews;
+      
+      // Ordena pelas avaliações reais retornadas pela API; perfis sem avaliação ficam no fim.
+      return b.rating - a.rating;
     });
-  }, [category, numericMin, numericMax, ratingFilter, distance, sort]);
+  }, [artists, searchQuery, category, numericMin, numericMax, ratingFilter, distance, sort]);
 
   useEffect(() => {
     setVisibleCount(6);
   }, [
     category,
+    searchQuery,
     numericMin,
     numericMax,
     ratingFilter,
@@ -539,7 +296,11 @@ export default function ExplorarScreen() {
               { backgroundColor: item.avatarColor },
             ]}
           >
-            <Text style={styles.avatarEmoji}>{item.emoji}</Text>
+            {item.avatarUrl ? (
+              <Image source={{ uri: item.avatarUrl }} style={styles.artistAvatarImage} />
+            ) : (
+              <Text style={styles.avatarEmoji}>{item.emoji}</Text>
+            )}
           </View>
           <View style={styles.tag}>
             <Text style={styles.tagText}>{item.style}</Text>
@@ -547,14 +308,10 @@ export default function ExplorarScreen() {
         </View>
         <Text style={styles.artistName}>{item.name}</Text>
         <Text style={styles.artistRating}>
-          ⭐{" "}
-          <Text style={styles.ratingBold}>
-            {item.rating.toFixed(1).replace(".", ",")}
-          </Text>{" "}
-          <Text style={styles.ratingCount}>({item.reviews})</Text>
+          {item.rating > 0 ? <>⭐ <Text style={styles.ratingBold}>{item.rating.toFixed(1).replace(".", ",")}</Text> <Text style={styles.ratingCount}>({item.reviews})</Text></> : <Text style={styles.ratingCount}>Ainda sem avaliações</Text>}
         </Text>
-        <Text style={styles.artistPrice}>{formatPrice(item.price)}/hora</Text>
-        <Text style={styles.artistDistance}>📍 {item.distanceKm} km</Text>
+        <Text style={styles.artistPrice}>{item.price > 0 ? `${formatPrice(item.price)}/hora` : "Preço a combinar"}</Text>
+        {item.distanceKm > 0 ? <Text style={styles.artistDistance}>📍 {item.distanceKm} km</Text> : null}
         <TouchableOpacity style={styles.profileButton}>
           <Text style={styles.profileButtonText}>Ver perfil</Text>
         </TouchableOpacity>
@@ -831,10 +588,10 @@ export default function ExplorarScreen() {
                 ListEmptyComponent={
                   <View style={styles.emptyState}>
                     <Text style={styles.emptyTitle}>
-                      Nenhum artista encontrado
+                      {loadingArtists ? "Carregando artistas..." : artistsError ? "Não foi possível carregar os artistas" : "Nenhum artista encontrado"}
                     </Text>
                     <Text style={styles.emptyText}>
-                      Tente aumentar o preço, a distância ou limpar os filtros.
+                      {loadingArtists ? "Buscando perfis cadastrados no banco de dados." : artistsError ? `${artistsError} Confira se a API está ligada e se o endpoint GET /api/artistas está disponível.` : "Tente outra busca ou limpe os filtros."}
                     </Text>
                   </View>
                 }
@@ -1007,6 +764,7 @@ const getStyles = (theme: any) =>
     heartIcon: { fontSize: 22, color: theme.textSecondary },
     heartIconActive: { fontSize: 22, color: theme.accent },
     avatarWrapper: { alignItems: "center", marginBottom: 12 },
+    artistAvatarImage: { width: "100%", height: "100%", borderRadius: 44 },
     avatarPlaceholder: {
       width: 88,
       height: 88,
