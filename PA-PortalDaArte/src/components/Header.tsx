@@ -11,12 +11,18 @@ import {
 import { Search, Bell, Settings, Sun, Moon, LogOut } from 'lucide-react-native';
 import { useTheme } from './context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
 
 export default function Header() {
   const [isMenuVisible, setIsMenuVisible] = useState(false);
   const [isAvatarMenuVisible, setIsAvatarMenuVisible] = useState(false);
   const [userName, setUserName] = useState('U');
+  
+  // Variáveis restauradas que corrigem o erro
+  const [searchText, setSearchText] = useState('');
+  const [profileImage, setProfileImage] = useState(null);
+  const pathname = usePathname();
+  const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://10.0.0.142:8000";
 
   const { isLightMode, toggleTheme, theme } = useTheme();
   
