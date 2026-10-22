@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  DeviceEventEmitter,
   Image,
   Linking,
   Modal,
@@ -87,6 +88,11 @@ export default function IndexScreen() {
   const [isArtista, setIsArtista] = useState(false);
   const [isBecomingArtistModalVisible, setIsBecomingArtistModalVisible] = useState(false);
   const [artistNameInput, setArtistNameInput] = useState("");
+  const [artistBioInput, setArtistBioInput] = useState("");
+  const [artistYearsInput, setArtistYearsInput] = useState("1");
+  const [artistPriceMinInput, setArtistPriceMinInput] = useState("");
+  const [artistPriceMaxInput, setArtistPriceMaxInput] = useState("");
+  const [artistModeInput, setArtistModeInput] = useState("ambos");
   const [selectedArtistCategory, setSelectedArtistCategory] = useState(FIXED_CATEGORIES[0]);
   const [isArtistCategoryModalVisible, setIsArtistCategoryModalVisible] = useState(false);
   const [isSubmittingArtist, setIsSubmittingArtist] = useState(false);
@@ -136,6 +142,10 @@ export default function IndexScreen() {
 
   const [bio, setBio] = useState("Bem-vindo ao Portal da Arte.");
   const [editedBio, setEditedBio] = useState("");
+  const [artistPriceMin, setArtistPriceMin] = useState<number | null>(null);
+  const [artistPriceMax, setArtistPriceMax] = useState<number | null>(null);
+  const [editedArtistPriceMin, setEditedArtistPriceMin] = useState("");
+  const [editedArtistPriceMax, setEditedArtistPriceMax] = useState("");
 
   const [customLinks, setCustomLinks] = useState<CustomLink[]>([]);
   const [editedCustomLinks, setEditedCustomLinks] = useState<CustomLink[]>([]);
@@ -189,6 +199,8 @@ export default function IndexScreen() {
           if (dados.is_artista) {
             setProfileCategory(dados.nome_artistico ? `${dados.nome_artistico}` : FIXED_CATEGORIES[0]);
             setBio(dados.biografia || "Conte um pouco sobre sua trajetória artística...");
+          setArtistPriceMin(dados.preco_min !== null && dados.preco_min !== undefined ? Number(dados.preco_min) : null);
+          setArtistPriceMax(dados.preco_max !== null && dados.preco_max !== undefined ? Number(dados.preco_max) : null);
           } else {
             setProfileCategory("Conta Cliente / Contratante");
             setBio(dados.biografia || "Explorando o Portal da Arte para contratar talentos e curtir apresentações.");
@@ -249,9 +261,49 @@ export default function IndexScreen() {
     fetchAllIbgeCities();
   }, []);
 
+  useEffect(() => {
+    if (!isArtista) return;
+    let active = true;
+    (async () => {
+      try {
+        const token = await AsyncStorage.getItem("access_token");
+        if (!token) return;
+        const response = await fetch(`${URL_API}/api/me/portfolio`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const payload = await response.json();
+        if (!response.ok) return;
+        const rows = Array.isArray(payload.portfolio) ? payload.portfolio : [];
+        if (active) {
+          setPortfolioItems(rows.map((item: any) => ({
+            id: String(item.portfolio_id || item.id),
+            name: item.titulo || "Trabalho artístico",
+            description: item.descricao || "",
+            file: null,
+            isFeatured: false,
+          })));
+        }
+      } catch (error) {
+        console.warn("Não foi possível carregar o portfólio", error);
+      }
+    })();
+    return () => { active = false; };
+  }, [isArtista]);
+
   const handleConfirmBecomeArtist = async () => {
     if (!artistNameInput.trim()) {
       Alert.alert("Atenção", "Por favor, digite o nome do artista ou da banda.");
+      return;
+    }
+    const parsePrice = (value: string) => value.trim() ? Number(value.replace(/\./g, "").replace(",", ".")) : null;
+    const precoMin = parsePrice(artistPriceMinInput);
+    const precoMax = parsePrice(artistPriceMaxInput);
+    if ((precoMin !== null && (!Number.isFinite(precoMin) || precoMin < 0)) || (precoMax !== null && (!Number.isFinite(precoMax) || precoMax < 0))) {
+      Alert.alert("Preço inválido", "Informe valores válidos e positivos para os preços.");
+      return;
+    }
+    if (precoMin !== null && precoMax !== null && precoMax < precoMin) {
+      Alert.alert("Preço inválido", "O preço máximo não pode ser menor que o mínimo.");
       return;
     }
 
@@ -274,19 +326,24 @@ export default function IndexScreen() {
         },
         body: JSON.stringify({
           nome_artistico: nomeArtistaLimpo,
-          biografia: bio,
-          anos_experiencia: 1,
-          modalidade_atendimento: "ambos",
+          biografia: artistBioInput.trim() || null,
+          anos_experiencia: Math.max(0, Number.parseInt(artistYearsInput || "0", 10) || 0),
+          modalidade_atendimento: artistModeInput,
           cidade_atendimento: cidadeNome,
           estado_atendimento: estadoSigla,
+          preco_min: precoMin,
+          preco_max: precoMax,
         }),
       });
 
       const result = await response.json();
       if (response.ok) {
         setIsArtista(true);
+        setArtistPriceMin(precoMin);
+        setArtistPriceMax(precoMax);
         setProfileCategory(selectedArtistCategory);
         setProfileName(nomeArtistaLimpo);
+        setBio(artistBioInput.trim() || "Conte um pouco sobre sua trajetória artística...");
         setIsBecomingArtistModalVisible(false);
         setArtistNameInput("");
         Alert.alert("Sucesso", "Parabéns! Agora sua conta é de Artista e os recursos de portfólio foram liberados.");
@@ -307,11 +364,15 @@ export default function IndexScreen() {
     setEditedLocation(location);
     setEditedProfileCategory(isArtista ? profileCategory : FIXED_CATEGORIES[0]);
     setEditedBio(bio);
+    setEditedArtistPriceMin(artistPriceMin !== null ? String(artistPriceMin).replace(".", ",") : "");
+    setEditedArtistPriceMax(artistPriceMax !== null ? String(artistPriceMax).replace(".", ",") : "");
     setEditedCustomLinks(JSON.parse(JSON.stringify(customLinks)));
     setIsEditingProfile(true);
   };
 
   const handleCancelEditingProfile = () => {
+    setEditedArtistPriceMin(artistPriceMin !== null ? String(artistPriceMin).replace(".", ",") : "");
+    setEditedArtistPriceMax(artistPriceMax !== null ? String(artistPriceMax).replace(".", ",") : "");
     setIsEditingProfile(false);
   };
 
@@ -321,32 +382,84 @@ export default function IndexScreen() {
       !editedLocation.trim() ||
       !editedBio.trim()
     ) {
+      Alert.alert("Atenção", "Preencha nome, localização e biografia.");
+      return;
+    }
+
+    const parseEditedPrice = (value: string) => {
+      if (!value.trim()) return null;
+      const raw = value.trim().replace(/\s/g, "");
+      const normalized = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
+      const parsed = Number(normalized);
+      return Number.isFinite(parsed) ? parsed : NaN;
+    };
+    const precoMinEditado = parseEditedPrice(editedArtistPriceMin);
+    const precoMaxEditado = parseEditedPrice(editedArtistPriceMax);
+    if (isArtista && ((precoMinEditado !== null && (!Number.isFinite(precoMinEditado) || precoMinEditado < 0)) || (precoMaxEditado !== null && (!Number.isFinite(precoMaxEditado) || precoMaxEditado < 0)))) {
+      Alert.alert("Preço inválido", "Informe valores válidos e positivos para os preços.");
+      return;
+    }
+    if (isArtista && precoMinEditado !== null && precoMaxEditado !== null && precoMaxEditado < precoMinEditado) {
+      Alert.alert("Preço inválido", "O preço máximo não pode ser menor que o mínimo.");
       return;
     }
 
     try {
       const token = await AsyncStorage.getItem("access_token");
+      if (!token) {
+        Alert.alert("Sessão expirada", "Entre novamente para salvar seu perfil.");
+        return;
+      }
 
       const partesCidade = editedLocation.split(",");
       const cidadeNome = partesCidade[0]?.trim() || editedLocation;
       const estadoSigla = partesCidade[1]?.trim() || "PE";
 
-      if (token) {
-        await fetch(`${URL_API}/api/perfis/me`, {
+      const response = await fetch(`${URL_API}/api/perfis/me`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          nome_completo: editedProfileName.trim(),
+          cidade: cidadeNome,
+          estado: estadoSigla,
+          biografia: editedBio.trim(),
+          foto_perfil: editedProfileImage,
+          // O documento obrigatório já foi informado no cadastro; a API o preserva.
+        }),
+      });
+
+      let result: any = {};
+      try {
+        result = await response.json();
+      } catch {
+        // A API pode responder sem corpo JSON em caso de erro.
+      }
+
+      if (!response.ok) {
+        Alert.alert(
+          "Erro ao salvar",
+          result.detail || "Não foi possível atualizar o perfil no servidor."
+        );
+        return;
+      }
+
+      if (isArtista) {
+        const priceResponse = await fetch(`${URL_API}/api/artistas/me/preco`, {
           method: "PUT",
-          headers: {
-            "Authorization": `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            nome_completo: editedProfileName.trim(),
-            cidade: cidadeNome,
-            estado: estadoSigla,
-            biografia: editedBio.trim(),
-            foto_perfil: editedProfileImage,
-            tipo_documento: "cpf",
-          }),
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ preco_min: precoMinEditado, preco_max: precoMaxEditado }),
         });
+        let priceResult: any = {};
+        try { priceResult = await priceResponse.json(); } catch {}
+        if (!priceResponse.ok) {
+          Alert.alert("Perfil parcialmente salvo", priceResult.detail || "Os dados do perfil foram salvos, mas não foi possível atualizar o preço.");
+          return;
+        }
+        setArtistPriceMin(precoMinEditado);
+        setArtistPriceMax(precoMaxEditado);
       }
 
       setProfileName(editedProfileName.trim());
@@ -356,8 +469,16 @@ export default function IndexScreen() {
       }
       setBio(editedBio.trim());
       setProfileImage(editedProfileImage);
+
+      // Atualiza o avatar do Header imediatamente, sem precisar trocar de tela.
+      DeviceEventEmitter.emit("profileUpdated", {
+        foto_perfil: editedProfileImage,
+        nome_completo: editedProfileName.trim(),
+      });
+
       setCustomLinks([...editedCustomLinks]);
       setIsEditingProfile(false);
+      Alert.alert("Sucesso", "Perfil atualizado com sucesso.");
     } catch (error) {
       console.error("Erro ao salvar perfil:", error);
       Alert.alert("Erro", "Não foi possível atualizar o perfil no servidor.");
@@ -488,21 +609,40 @@ export default function IndexScreen() {
     }
   };
 
-  const handleAddPortfolio = () => {
-    if (!portfolioName.trim() || !portfolioDescription.trim()) return;
-    const newPortfolio: PortfolioItem = {
-      id: Date.now().toString(),
-      name: portfolioName.trim(),
-      description: portfolioDescription.trim(),
-      file: portfolioFile,
-      isFeatured: false,
-    };
-    setPortfolioItems((current) => [...current, newPortfolio]);
-    closePortfolioModal();
+  const handleAddPortfolio = async () => {
+    if (!portfolioName.trim() || !portfolioDescription.trim()) {
+      Alert.alert("Campos obrigatórios", "Informe o título e a descrição do trabalho.");
+      return;
+    }
+    try {
+      const token = await AsyncStorage.getItem("access_token");
+      if (!token) throw new Error("Faça login novamente para salvar seu portfólio.");
+      const response = await fetch(`${URL_API}/api/artistas/portfolio`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ titulo: portfolioName.trim(), descricao: portfolioDescription.trim() }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Não foi possível salvar o item.");
+      setPortfolioItems((current) => [...current, { id: String(result.id), name: result.titulo, description: result.descricao, file: null, isFeatured: false }]);
+      if (portfolioFile) Alert.alert("Item salvo", "Título e descrição foram publicados. O arquivo selecionado ainda não é enviado ao servidor.");
+      closePortfolioModal();
+    } catch (error: any) {
+      Alert.alert("Erro ao salvar", error?.message || "Não foi possível salvar o item do portfólio.");
+    }
   };
 
-  const handleDeletePortfolioItem = (id: string) => {
-    setPortfolioItems((current) => current.filter((item) => item.id !== id));
+  const handleDeletePortfolioItem = async (id: string) => {
+    try {
+      const token = await AsyncStorage.getItem("access_token");
+      if (!token) throw new Error("Faça login novamente.");
+      const response = await fetch(`${URL_API}/api/artistas/portfolio/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || "Não foi possível excluir o item.");
+      setPortfolioItems((current) => current.filter((item) => item.id !== id));
+    } catch (error: any) {
+      Alert.alert("Erro", error?.message || "Não foi possível excluir o item.");
+    }
   };
 
   const handleToggleFeaturePortfolio = (id: string) => {
@@ -796,6 +936,8 @@ export default function IndexScreen() {
                       )}
                     </View>
 
+
+
                     {!isEditingProfile ? (
                       <>
                         <Text style={styles.bioText}>{bio}</Text>
@@ -926,6 +1068,46 @@ export default function IndexScreen() {
                           label="Avaliação média"
                           icon={<Text style={styles.starIcon}>★</Text>}
                         />
+                        <View
+                        style={[
+                          styles.statCard,
+                          {
+                            marginBottom: 0,
+                            marginRight: 12,
+                            minWidth: 0,
+                            alignItems: isEditingProfile ? "stretch" : "center",
+                            flexDirection: isEditingProfile ? "column" : "row",
+                          },
+                        ]}
+                      >
+                        <View style={[styles.statIcon, isEditingProfile && { alignSelf: "flex-start", marginBottom: 10 }]}>
+                          <Text style={{ color: theme.accent, fontSize: 13, fontWeight: "800" }}>R$</Text>
+                        </View>
+                        {!isEditingProfile ? (
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.statNumber}>
+                              {artistPriceMin !== null
+                                ? `R$ ${artistPriceMin.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : "Não informado"}
+                              {artistPriceMax !== null && artistPriceMax !== artistPriceMin
+                                ? ` – R$ ${artistPriceMax.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : ""}
+                            </Text>
+                            <Text style={styles.statLabel}>Meu valor</Text>
+                          </View>
+                        ) : (
+                          <View style={{ width: "100%" }}>
+                            <Text style={[styles.statLabel, { fontSize: 12, fontWeight: "700", marginBottom: 10 }]}>Meu valor · Editar preços (R$)</Text>
+                            <Text style={styles.editFieldLabel}>Preço inicial</Text>
+                            <TextInput value={editedArtistPriceMin} onChangeText={setEditedArtistPriceMin} keyboardType="decimal-pad" placeholder="Ex.: 300,00" placeholderTextColor={theme.textSecondary} style={[styles.formInput, { marginBottom: 10 }]} />
+                            <Text style={styles.editFieldLabel}>Preço máximo (opcional)</Text>
+                            <TextInput value={editedArtistPriceMax} onChangeText={setEditedArtistPriceMax} keyboardType="decimal-pad" placeholder="Ex.: 900,00" placeholderTextColor={theme.textSecondary} style={styles.formInput} />
+                            <Text style={{ color: theme.textSecondary, fontSize: 10, marginTop: 6 }}>Deixe os campos vazios para remover a faixa de preço.</Text>
+                          </View>
+                        )}
+                      </View>
+                      </View>
+                      <View style={styles.statsRow}>
                         <StatCard
                           theme={theme}
                           number={estatisticas.total_contratacoes}
@@ -1224,6 +1406,11 @@ export default function IndexScreen() {
                         style={styles.becomeArtistButton}
                         onPress={() => {
                           setArtistNameInput("");
+                          setArtistBioInput(bio && !bio.startsWith("Explorando") ? bio : "");
+                          setArtistYearsInput("1");
+                          setArtistPriceMinInput("");
+                          setArtistPriceMaxInput("");
+                          setArtistModeInput("ambos");
                           setSelectedArtistCategory(FIXED_CATEGORIES[0]);
                           setIsBecomingArtistModalVisible(true);
                         }}
@@ -1253,7 +1440,7 @@ export default function IndexScreen() {
               <View>
                 <Text style={styles.modalTitle}>Tornar-se Artista</Text>
                 <Text style={styles.modalSubtitle}>
-                  Informe seu nome artístico e escolha a categoria de atuação
+                  Essas informações ajudam clientes a conhecer seu trabalho e contratar seus serviços
                 </Text>
               </View>
               <TouchableOpacity
@@ -1264,7 +1451,7 @@ export default function IndexScreen() {
               </TouchableOpacity>
             </View>
 
-            <View style={styles.modalContent}>
+            <ScrollView style={styles.modalContent} contentContainerStyle={{ paddingBottom: 8 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <View style={styles.formGroup}>
                 <Text style={styles.inputLabel}>Nome do Artista / Banda</Text>
                 <TextInput
@@ -1277,6 +1464,38 @@ export default function IndexScreen() {
                 />
               </View>
 
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Sobre você / sua banda</Text>
+                <TextInput
+                  value={artistBioInput}
+                  onChangeText={setArtistBioInput}
+                  placeholder="Experiência, repertório, estilos e tipos de evento..."
+                  placeholderTextColor={theme.textSecondary}
+                  style={[styles.formInput, { minHeight: 82, textAlignVertical: "top", paddingTop: 12 }]}
+                  multiline
+                  maxLength={1000}
+                />
+              </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Anos de experiência</Text>
+                <TextInput value={artistYearsInput} onChangeText={setArtistYearsInput} keyboardType="number-pad" placeholder="Ex.: 5" placeholderTextColor={theme.textSecondary} style={styles.formInput} />
+              </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Preço inicial (R$)</Text>
+                <TextInput value={artistPriceMinInput} onChangeText={setArtistPriceMinInput} keyboardType="decimal-pad" placeholder="Ex.: 500,00" placeholderTextColor={theme.textSecondary} style={styles.formInput} />
+                <Text style={[styles.inputLabel, { marginTop: 8 }]}>Preço máximo (opcional)</Text>
+                <TextInput value={artistPriceMaxInput} onChangeText={setArtistPriceMaxInput} keyboardType="decimal-pad" placeholder="Ex.: 1500,00" placeholderTextColor={theme.textSecondary} style={styles.formInput} />
+              </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Modalidade de atendimento</Text>
+                <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                  {[{label:"Presencial", value:"presencial"}, {label:"Remoto", value:"remoto"}, {label:"Ambos", value:"ambos"}].map((option) => (
+                    <TouchableOpacity key={option.value} onPress={() => setArtistModeInput(option.value)} style={{ borderWidth: 1, borderColor: artistModeInput === option.value ? theme.accent : theme.borderColor, backgroundColor: artistModeInput === option.value ? theme.accent + "22" : "transparent", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 }}>
+                      <Text style={{ color: theme.textPrimary, fontWeight: artistModeInput === option.value ? "700" : "500" }}>{option.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
               <View style={styles.formGroup}>
                 <Text style={styles.inputLabel}>Categoria de Atuação</Text>
                 <TouchableOpacity
@@ -1293,7 +1512,7 @@ export default function IndexScreen() {
                   </View>
                 </TouchableOpacity>
               </View>
-            </View>
+            </ScrollView>
 
             <View style={styles.modalFooter}>
               <TouchableOpacity
@@ -2473,6 +2692,7 @@ const getStyles = (theme: any) =>
     modalContainer: {
       width: "100%",
       maxWidth: 520,
+      maxHeight: "90%",
       backgroundColor: theme.cardBg,
       borderRadius: 14,
       borderWidth: 1,
