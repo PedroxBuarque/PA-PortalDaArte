@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { 
   Image,
+  DeviceEventEmitter,
   StyleSheet, 
   View, 
   TextInput, 
@@ -28,7 +29,7 @@ export default function Header() {
   
   const styles = getStyles(theme);
 
-  // Busca isolada dos dados do usuário logado atual
+  // Busca os dados do usuário ao abrir o header/trocar de tela e escuta alterações salvas no perfil.
   useEffect(() => {
     async function fetchHeaderUserData() {
       try {
@@ -55,7 +56,21 @@ export default function Header() {
       }
     }
     fetchHeaderUserData();
-  }, []);
+
+    const profileUpdatedSubscription = DeviceEventEmitter.addListener(
+      'profileUpdated',
+      (dados: { foto_perfil?: string | null; nome_completo?: string | null }) => {
+        if (typeof dados.foto_perfil !== 'undefined') {
+          setProfileImage(dados.foto_perfil || null);
+        }
+        if (dados.nome_completo) {
+          setUserName(dados.nome_completo.charAt(0).toUpperCase());
+        }
+      }
+    );
+
+    return () => profileUpdatedSubscription.remove();
+  }, [pathname]);
 
   // Atualiza os parâmetros da tela atual sem navegar/remontar a tela
   // a cada tecla, para manter o foco e permitir digitar frases completas.

@@ -18,7 +18,7 @@ import {
 import Header from "../../../components/Header";
 import Sidebar from "../../../components/Sidebar";
 import { useTheme } from "../../../components/context/ThemeContext";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -116,6 +116,7 @@ export default function ExplorarScreen() {
   const { width } = useWindowDimensions();
   const isMobile = width < 900; // Define se é tela de celular/tablet pequeno
   const params = useLocalSearchParams<{ search?: string }>();
+  const router = useRouter();
   const searchQuery = (Array.isArray(params.search) ? params.search[0] : params.search || "").trim();
 
   const [artists, setArtists] = useState<Artist[]>([]);
@@ -312,7 +313,11 @@ export default function ExplorarScreen() {
         </Text>
         <Text style={styles.artistPrice}>{item.price > 0 ? `${formatPrice(item.price)}/hora` : "Preço a combinar"}</Text>
         {item.distanceKm > 0 ? <Text style={styles.artistDistance}>📍 {item.distanceKm} km</Text> : null}
-        <TouchableOpacity style={styles.profileButton}>
+        <TouchableOpacity
+          style={styles.profileButton}
+          activeOpacity={0.85}
+          onPress={() => router.push({ pathname: "/pages/perfil_publico/perfil_publico", params: { id: String(item.id) } } as any)}
+        >
           <Text style={styles.profileButtonText}>Ver perfil</Text>
         </TouchableOpacity>
       </View>

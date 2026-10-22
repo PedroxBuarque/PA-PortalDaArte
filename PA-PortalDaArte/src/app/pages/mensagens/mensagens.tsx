@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -14,6 +14,8 @@ import {
   Modal,
   Dimensions,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useLocalSearchParams } from 'expo-router';
 import {
   Music,
   Headphones,
@@ -35,65 +37,27 @@ import Header from '../../../components/Header';
 import { useTheme } from '../../../components/context/ThemeContext';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const URL_API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
 // ---------------------------------------------------------------------------
 // 1) DADOS FIXOS
 // ---------------------------------------------------------------------------
 
-const CONVERSATIONS = [
-  {
-    id: '1',
-    name: 'Juliana Diniz',
-    category: 'Cantora • MPB',
-    lastMessage: 'Sobre a contratação',
-    time: '19:30',
-    unread: 2,
-    icon: Mic,
-    darkBgColor: '#1B3736',
-    lightBgColor: '#E0F2F1',
-    iconColor: '#20B2AA',
-    status: 'Online agora',
-  },
-  {
-    id: '2',
-    name: 'Banda Vereda',
-    category: 'Forró • 5 integrantes',
-    lastMessage: 'Envio de proposta',
-    time: 'Ontem',
-    unread: 0,
-    icon: Music,
-    darkBgColor: '#412C1B',
-    lightBgColor: '#FDE4D9',
-    iconColor: '#E05A10',
-    status: 'Offline',
-  },
-  {
-    id: '3',
-    name: 'Lucas Andrade',
-    category: 'Violão e Voz',
-    lastMessage: 'Disponibilidade',
-    time: '12/08',
-    unread: 0,
-    icon: Music,
-    darkBgColor: '#3D2218',
-    lightBgColor: '#FDE4D9',
-    iconColor: '#E05A10',
-    status: 'Offline',
-  },
-  {
-    id: '4',
-    name: 'DJ Marina',
-    category: 'Eletrônica • DJ Set',
-    lastMessage: 'Obrigado!',
-    time: '10/08',
-    unread: 0,
-    icon: Headphones,
-    darkBgColor: '#2E2243',
-    lightBgColor: '#EBE4FA',
-    iconColor: '#8C52FF',
-    status: 'Offline',
-  },
-];
+type ConversaUI = {
+  id: string;
+  name: string;
+  category: string;
+  lastMessage: string;
+  time: string;
+  unread: number;
+  icon: any;
+  darkBgColor: string;
+  lightBgColor: string;
+  iconColor: string;
+  status: string;
+  outroUsuarioId: number;
+  fotoPerfil?: string | null;
+};
 
 type Mensagem = {
   id: string;
@@ -104,31 +68,21 @@ type Mensagem = {
   mediaType?: 'image' | 'video' | null;
 };
 
-const INITIAL_MESSAGES: Record<string, Mensagem[]> = { 
-  '1': [ 
-    { id: 'm1', fromMe: true, text: 'Olá Juliana, podemos confirmar sua contratação para um casamento?', time: '18:13' },
-    { id: 'm2', fromMe: false, text: 'Olá Clara! está tudo pronto pra o show, pode fechar sim.', time: '18:15' },
-    { id: 'm3', fromMe: true, text: 'Perfeito! Já reservei a data de 24/08 aqui na minha agenda de apresentações.', time: '19:32' },
-    { id: 'm4', fromMe: false, text: 'Apenas uma dúvida: o local já conta com equipamento de som ou eu devo incluir no orçamento?', time: '19:34' },
-  ],
-  '2': [
-    { id: 'm1', fromMe: false, text: 'Enviei a proposta atualizada, dá uma olhada quando puder!', time: 'Ontem' },
-  ],
-  '3': [
-    { id: 'm1', fromMe: false, text: 'Tenho disponibilidade sim, qual seria a data do evento?', time: '12/08' },
-  ],
-  '4': [
-    { id: 'm1', fromMe: false, text: 'Obrigado pela contratação, foi um prazer tocar no seu evento!', time: '10/08' },
-  ],
-};
-
 export default function MensagensScreen() {
   const { theme, isLightMode } = useTheme();
   const styles = getStyles(theme) as any;
 
-  const [selectedId, setSelectedId] = useState(CONVERSATIONS[0].id);
+  const params = useLocalSearchParams<{ destinatarioId?: string | string[]; destinatarioNome?: string | string[]; conversaId?: string | string[] }>();
+  const destinatarioId = Array.isArray(params.destinatarioId) ? params.destinatarioId[0] : params.destinatarioId;
+  const conversaIdParam = Array.isArray(params.conversaId) ? params.conversaId[0] : params.conversaId;
+  const [conversations, setConversations] = useState<ConversaUI[]>([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [loadingConversations, setLoadingConversations] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [requestError, setRequestError] = useState('');
+  const openedTargetRef = useRef<string | null>(null);
   const [messageText, setMessageText] = useState('');
-  const [messagesData, setMessagesData] = useState<Record<string, Mensagem[]>>(INITIAL_MESSAGES);
+  const [messagesData, setMessagesData] = useState<Record<string, Mensagem[]>>({});
   const [midiaAnexada, setMidiaAnexada] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
   
   // Estados de visualização e menus de mensagens
@@ -139,11 +93,119 @@ export default function MensagensScreen() {
 
   const LIMITE_CARACTERES = 500;
 
-  const selectedConversation = CONVERSATIONS.find((c) => c.id === selectedId);
+  const selectedConversation = conversations.find((c) => c.id === selectedId);
   const SelectedIcon = selectedConversation?.icon;
   const messages = messagesData[selectedId] || [];
 
-  const totalUnread = CONVERSATIONS.reduce((sum, c) => sum + c.unread, 0);
+  const totalUnread = conversations.reduce((sum, c) => sum + c.unread, 0);
+
+  const getToken = async () => {
+    const token = await AsyncStorage.getItem('access_token');
+    if (!token) throw new Error('Sua sessão expirou. Entre novamente para acessar as mensagens.');
+    return token;
+  };
+
+  const mapConversa = (item: any): ConversaUI => {
+    const name = String(item.nome || item.name || 'Usuário');
+    const isBand = /banda/i.test(name);
+    const isDj = /dj/i.test(name);
+    const IconComponent = isDj ? Headphones : isBand ? Music : Mic;
+    return {
+      id: String(item.id),
+      name,
+      category: item.foto_perfil ? 'Conversa' : 'Perfil',
+      lastMessage: item.ultima_mensagem || 'Inicie a conversa',
+      time: item.ultima_mensagem_em ? new Date(item.ultima_mensagem_em).toLocaleDateString() === new Date().toLocaleDateString()
+        ? new Date(item.ultima_mensagem_em).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : new Date(item.ultima_mensagem_em).toLocaleDateString('pt-BR') : '',
+      unread: Number(item.nao_lidas || 0),
+      icon: IconComponent,
+      darkBgColor: '#1B3736',
+      lightBgColor: '#E0F2F1',
+      iconColor: '#20B2AA',
+      status: 'Conversa',
+      outroUsuarioId: Number(item.outro_usuario_id),
+      fotoPerfil: item.foto_perfil || null,
+    };
+  };
+
+  const carregarConversas = async (selectId?: string) => {
+    const token = await getToken();
+    const response = await fetch(`${URL_API}/api/conversas`, { headers: { Authorization: `Bearer ${token}` } });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || 'Não foi possível carregar suas conversas.');
+    const rows = Array.isArray(payload) ? payload : (payload.conversas || []);
+    const mapped = rows.map(mapConversa);
+    setConversations(mapped);
+    const wanted = selectId || conversaIdParam;
+    if (wanted && mapped.some((c: ConversaUI) => c.id === String(wanted))) setSelectedId(String(wanted));
+    else if (!selectedId && mapped.length) setSelectedId(mapped[0].id);
+    return mapped;
+  };
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      setLoadingConversations(true);
+      setRequestError('');
+      try {
+        if (destinatarioId && openedTargetRef.current !== String(destinatarioId)) {
+          openedTargetRef.current = String(destinatarioId);
+          const token = await getToken();
+          const response = await fetch(`${URL_API}/api/conversas`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artista_id: Number(destinatarioId) }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.detail || 'Não foi possível iniciar a conversa.');
+          const mapped = await carregarConversas(String(payload.conversa_id));
+          if (active && !mapped.some((c: ConversaUI) => c.id === String(payload.conversa_id))) {
+            setSelectedId(String(payload.conversa_id));
+          }
+        } else {
+          await carregarConversas(conversaIdParam);
+        }
+      } catch (error: any) {
+        if (active) setRequestError(error?.message || 'Erro ao carregar mensagens.');
+      } finally {
+        if (active) setLoadingConversations(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [destinatarioId, conversaIdParam]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    let active = true;
+    (async () => {
+      setLoadingMessages(true);
+      try {
+        const token = await getToken();
+        const response = await fetch(`${URL_API}/api/conversas/${selectedId}/mensagens`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Não foi possível carregar as mensagens.');
+        const rows = Array.isArray(payload) ? payload : (payload.mensagens || []);
+        if (active) setMessagesData((prev) => ({
+          ...prev,
+          [selectedId]: rows.map((row: any) => ({
+            id: String(row.id),
+            fromMe: Boolean(row.fromMe),
+            text: String(row.text ?? row.conteudo ?? ''),
+            time: String(row.time || ''),
+          })),
+        }));
+        if (active) setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, unread: 0 } : c));
+      } catch (error: any) {
+        if (active) setRequestError(error?.message || 'Erro ao carregar as mensagens.');
+      } finally {
+        if (active) setLoadingMessages(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [selectedId]);
 
   const handleSelecionarMidia = async () => {
     try {
@@ -172,27 +234,37 @@ export default function MensagensScreen() {
     }
   };
 
-  const handleSendMessage = () => {
-    if (!messageText.trim() && !midiaAnexada) return;
-
-    const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    
-    const novaMensagem: Mensagem = {
-      id: String(Date.now()),
-      fromMe: true,
-      text: messageText.trim(),
-      time: currentTime,
-      mediaUri: midiaAnexada ? midiaAnexada.uri : null,
-      mediaType: midiaAnexada ? midiaAnexada.type : null,
-    };
-
-    setMessagesData((prev) => ({
-      ...prev,
-      [selectedId]: [...(prev[selectedId] || []), novaMensagem],
-    }));
-
-    setMessageText('');
-    setMidiaAnexada(null);
+  const handleSendMessage = async () => {
+    const content = messageText.trim();
+    if (!selectedId || (!content && !midiaAnexada)) return;
+    if (midiaAnexada) {
+      Alert.alert('Mídia não disponível', 'O banco de dados atual aceita mensagens de texto. Remova o anexo e envie sua mensagem em texto.');
+      return;
+    }
+    if (!content) return;
+    try {
+      const token = await getToken();
+      const response = await fetch(`${URL_API}/api/conversas/${selectedId}/mensagens`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conteudo: content }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'Não foi possível enviar a mensagem.');
+      const row = payload.mensagem;
+      const novaMensagem: Mensagem = {
+        id: String(row.id),
+        fromMe: true,
+        text: String(row.text ?? row.conteudo ?? content),
+        time: String(row.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
+      };
+      setMessagesData((prev) => ({ ...prev, [selectedId]: [...(prev[selectedId] || []), novaMensagem] }));
+      setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, lastMessage: content, time: novaMensagem.time } : c));
+      setMessageText('');
+      setRequestError('');
+    } catch (error: any) {
+      Alert.alert('Erro ao enviar', error?.message || 'Não foi possível enviar a mensagem.');
+    }
   };
 
   const handleKeyPress = (e: any) => {
@@ -243,7 +315,14 @@ export default function MensagensScreen() {
                 style={styles.conversationsScroll}
                 showsVerticalScrollIndicator={true}
               >
-                {CONVERSATIONS.map((item) => {
+                {requestError ? <Text style={styles.errorText}>{requestError}</Text> : null}
+                {!loadingConversations && conversations.length === 0 ? (
+                  <View style={styles.emptyConversations}>
+                    <Text style={styles.pageSubtitle}>Você ainda não tem conversas.</Text>
+                    <Text style={styles.pageSubtitle}>Acesse Explorar e toque em “Ver perfil” para iniciar uma mensagem.</Text>
+                  </View>
+                ) : null}
+                {conversations.map((item) => {
                   const IconComponent = item.icon;
                   const avatarBg = isLightMode ? item.lightBgColor : item.darkBgColor;
                   const isActive = item.id === selectedId;
@@ -259,7 +338,7 @@ export default function MensagensScreen() {
                       onPress={() => setSelectedId(item.id)}
                     >
                       <View style={[styles.avatarContainer, { backgroundColor: avatarBg }]}>
-                        <IconComponent size={20} color={item.iconColor} />
+                        {item.fotoPerfil ? <Image source={{ uri: item.fotoPerfil }} style={styles.avatarImage} /> : <IconComponent size={20} color={item.iconColor} />}
                       </View>
 
                       <View style={styles.conversationDetails}>
@@ -305,10 +384,7 @@ export default function MensagensScreen() {
                           },
                         ]}
                       >
-                        <SelectedIcon
-                          size={18}
-                          color={selectedConversation.iconColor}
-                        />
+                        {selectedConversation.fotoPerfil ? <Image source={{ uri: selectedConversation.fotoPerfil }} style={styles.chatAvatarImage} /> : <SelectedIcon size={18} color={selectedConversation.iconColor} />}
                       </View>
                       <View>
                         <Text style={styles.chatHeaderName}>{selectedConversation.name}</Text>
@@ -319,7 +395,7 @@ export default function MensagensScreen() {
                       </View>
                     </View>
 
-                    <TouchableOpacity style={styles.btnConfirm} activeOpacity={0.85}>
+                    <TouchableOpacity style={styles.btnConfirm} activeOpacity={0.85} onPress={() => Alert.alert("Contratação", "O fluxo de contratação ainda precisa ser conectado à API de propostas.")}>
                       <Text style={styles.btnConfirmText}>Confirmar Contratação</Text>
                     </TouchableOpacity>
                   </View>
@@ -329,6 +405,8 @@ export default function MensagensScreen() {
                     contentContainerStyle={styles.messagesScrollContent}
                     showsVerticalScrollIndicator={false}
                   >
+                    {loadingMessages && messages.length === 0 ? <Text style={styles.pageSubtitle}>Carregando mensagens...</Text> : null}
+                    {!loadingMessages && messages.length === 0 ? <Text style={styles.pageSubtitle}>Ainda não há mensagens. Envie a primeira!</Text> : null}
                     {messages.map((msg) => {
                       const isHovered = hoveredMessageId === msg.id;
                       const isMenuOpen = activeMenuMessageId === msg.id;
@@ -614,6 +692,10 @@ const getStyles = (theme: any) =>
       backgroundColor: theme.cardBg,
       borderColor: theme.accent,
     },
+    avatarImage: { width: 40, height: 40, borderRadius: 20 },
+    chatAvatarImage: { width: 36, height: 36, borderRadius: 18 },
+    errorText: { color: '#E05A10', fontSize: 12, marginVertical: 8 },
+    emptyConversations: { paddingVertical: 20, gap: 8 },
     avatarContainer: {
       width: 40,
       height: 40,

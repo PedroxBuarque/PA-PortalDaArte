@@ -103,7 +103,7 @@ class PerfilUpdate(BaseModel):
     telefone: Optional[str] = None
     cidade: Optional[str] = None
     estado: Optional[str] = Field(None, max_length=2)
-    tipo_documento: str
+    tipo_documento: Optional[str] = None
     cpf: Optional[str] = None
     cnpj: Optional[str] = None
     foto_perfil: Optional[str] = None  # Recebe a imagem codificada em Base64
@@ -116,6 +116,12 @@ class PerfilArtistaCreate(BaseModel):
     modalidade_atendimento: str = "ambos"
     cidade_atendimento: Optional[str] = None
     estado_atendimento: Optional[str] = None
+    preco_min: Optional[float] = Field(None, ge=0)
+    preco_max: Optional[float] = Field(None, ge=0)
+
+class PortfolioCreate(BaseModel):
+    titulo: str = Field(..., min_length=1, max_length=150)
+    descricao: Optional[str] = None
 
 class ServicoCreate(BaseModel):
     titulo: str
@@ -132,6 +138,14 @@ class PropostaCreate(BaseModel):
     local_ou_modalidade: Optional[str] = None
     prazo_estimado: Optional[str] = None
     valor_proposto: float
+
+
+class ConversaCreate(BaseModel):
+    artista_id: int
+    servico_id: Optional[int] = None
+
+class MensagemCreate(BaseModel):
+    conteudo: str = Field(..., min_length=1, max_length=500)
 
 class PagamentoCreate(BaseModel):
     contrato_id: int
@@ -556,6 +570,11 @@ def obter_perfil_logado(current_user: dict = Depends(get_usuario_atual)):
             WHERE usuario_id = %s
         """, (usuario_id,))
         artista = cursor.fetchone()
+        cursor.execute("""
+            SELECT preco_min, preco_max
+            FROM servicos WHERE artista_id = %s ORDER BY id ASC LIMIT 1
+        """, (usuario_id,))
+        precos_artista = cursor.fetchone() or {"preco_min": None, "preco_max": None}
 
         is_artista = False
         nome_artistico = None
@@ -599,6 +618,8 @@ def obter_perfil_logado(current_user: dict = Depends(get_usuario_atual)):
             "is_artista": is_artista,  # Retorna True apenas se o usuário tiver perfil de artista
             "nome_artistico": nome_artistico,
             "biografia": biografia,
+            "preco_min": float(precos_artista["preco_min"]) if precos_artista.get("preco_min") is not None else None,
+            "preco_max": float(precos_artista["preco_max"]) if precos_artista.get("preco_max") is not None else None,
             "estatisticas": estatisticas
         }
 
@@ -623,61 +644,324 @@ def obter_perfil_logado(current_user: dict = Depends(get_usuario_atual)):
 
 @app.put("/api/perfis/me", tags=["Perfil"])
 def atualizar_perfil_logado(perfil: PerfilUpdate, current_user: dict = Depends(get_usuario_atual)):
-    """Atualiza os dados pessoais, foto de perfil (Base64) e biografia na tabela `perfis` do usuário logado."""
+    """Atualiza o perfil sem inventar documento e preserva o documento obrigatório do cadastro."""
     usuario_id = current_user["id"]
     conexao = None
     cursor = None
+
     try:
         conexao = get_db_connection()
         cursor = conexao.cursor(dictionary=True)
 
-        cursor.execute("SELECT usuario_id FROM perfis WHERE usuario_id = %s", (usuario_id,))
+        cursor.execute(
+            "SELECT usuario_id, tipo_documento, cpf, cnpj FROM perfis WHERE usuario_id = %s",
+            (usuario_id,)
+        )
         db_perfil = cursor.fetchone()
 
-        tipo_doc = perfil.tipo_documento if perfil.tipo_documento in ['cpf', 'cnpj'] else 'cpf'
-        cpf_val = perfil.cpf.strip() if perfil.cpf and perfil.cpf.strip() else None
-        cnpj_val = perfil.cnpj.strip() if perfil.cnpj and perfil.cnpj.strip() else None
+        # O documento é obrigatório no cadastro. Na tela de edição, porém, o usuário
+        # pode alterar apenas nome/localização/biografia: nesse caso, preserve o documento
+        # que já está no banco, sem gerar CPF/CNPJ fictício nem trocar seu tipo.
+        cpf_enviado = ''.join(ch for ch in (perfil.cpf or '') if ch.isdigit()) or None
+        cnpj_enviado = ''.join(ch for ch in (perfil.cnpj or '') if ch.isdigit()) or None
 
-        if tipo_doc == 'cpf' and not cpf_val:
-            cpf_val = "00000000000"
-        if tipo_doc == 'cnpj' and not cnpj_val:
-            cnpj_val = "00000000000000"
+        if cpf_enviado and cnpj_enviado:
+            raise HTTPException(status_code=422, detail="Informe apenas CPF ou CNPJ, não ambos.")
+
+        documento_enviado = bool(cpf_enviado or cnpj_enviado)
+
+        if documento_enviado:
+            if cpf_enviado:
+                if len(cpf_enviado) != 11:
+                    raise HTTPException(status_code=422, detail="O CPF deve conter 11 dígitos.")
+                tipo_doc = "cpf"
+                cpf_val, cnpj_val = cpf_enviado, None
+            else:
+                if len(cnpj_enviado) != 14:
+                    raise HTTPException(status_code=422, detail="O CNPJ deve conter 14 dígitos.")
+                tipo_doc = "cnpj"
+                cpf_val, cnpj_val = None, cnpj_enviado
+        else:
+            if not db_perfil:
+                raise HTTPException(
+                    status_code=422,
+                    detail="O perfil ainda não possui documento cadastrado. Informe o CPF ou CNPJ usado no cadastro."
+                )
+            tipo_doc = db_perfil.get("tipo_documento")
+            cpf_val = db_perfil.get("cpf")
+            cnpj_val = db_perfil.get("cnpj")
+            if tipo_doc == "cpf" and not cpf_val:
+                raise HTTPException(status_code=422, detail="O CPF do cadastro não foi encontrado. Informe o CPF para continuar.")
+            if tipo_doc == "cnpj" and not cnpj_val:
+                raise HTTPException(status_code=422, detail="O CNPJ do cadastro não foi encontrado. Informe o CNPJ para continuar.")
+            if tipo_doc not in ("cpf", "cnpj"):
+                raise HTTPException(status_code=422, detail="O tipo de documento cadastrado é inválido. Informe CPF ou CNPJ.")
 
         if not db_perfil:
             query_insert = """
-                INSERT INTO perfis (usuario_id, nome_completo, telefone, cidade, estado, tipo_documento, cpf, cnpj, foto_perfil_url)
+                INSERT INTO perfis
+                    (usuario_id, nome_completo, telefone, cidade, estado,
+                     tipo_documento, cpf, cnpj, foto_perfil_url)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             cursor.execute(query_insert, (
                 usuario_id, perfil.nome_completo, perfil.telefone, perfil.cidade,
-                perfil.estado, tipo_doc, cpf_val if tipo_doc == 'cpf' else None, cnpj_val if tipo_doc == 'cnpj' else None, perfil.foto_perfil
+                perfil.estado, tipo_doc, cpf_val, cnpj_val, perfil.foto_perfil
             ))
         else:
             query_update = """
-                UPDATE perfis 
-                SET nome_completo = %s, telefone = %s, cidade = %s, estado = %s, tipo_documento = %s, cpf = %s, cnpj = %s, foto_perfil_url = COALESCE(%s, foto_perfil_url)
+                UPDATE perfis
+                SET nome_completo = %s,
+                    telefone = %s,
+                    cidade = %s,
+                    estado = %s,
+                    tipo_documento = %s,
+                    cpf = %s,
+                    cnpj = %s,
+                    foto_perfil_url = COALESCE(%s, foto_perfil_url)
                 WHERE usuario_id = %s
             """
             cursor.execute(query_update, (
                 perfil.nome_completo, perfil.telefone, perfil.cidade,
-                perfil.estado, tipo_doc, cpf_val if tipo_doc == 'cpf' else None, cnpj_val if tipo_doc == 'cnpj' else None, perfil.foto_perfil, usuario_id
+                perfil.estado, tipo_doc, cpf_val, cnpj_val,
+                perfil.foto_perfil, usuario_id
             ))
 
-        # Atualiza também a biografia caso o usuário seja artista
         if perfil.biografia is not None:
-            cursor.execute("UPDATE perfis_artista SET biografia = %s WHERE usuario_id = %s", (perfil.biografia, usuario_id))
+            cursor.execute(
+                "UPDATE perfis_artista SET biografia = %s WHERE usuario_id = %s",
+                (perfil.biografia, usuario_id)
+            )
 
         conexao.commit()
         return {"status": "sucesso", "mensagem": "Perfil atualizado com sucesso"}
-    except Exception as err:
+
+    except mysql.connector.IntegrityError as err:
+        if conexao:
+            conexao.rollback()
+        print("--- ERRO DE INTEGRIDADE EM /api/perfis/me (PUT) ---")
+        traceback.print_exc()
+        if getattr(err, "errno", None) == 1062:
+            raise HTTPException(
+                status_code=409,
+                detail="Este CPF ou CNPJ já está cadastrado em outra conta. Confira o documento informado."
+            )
+        raise HTTPException(
+            status_code=400,
+            detail="Os dados informados não atendem às regras do cadastro."
+        )
+    except HTTPException:
+        if conexao:
+            conexao.rollback()
+        raise
+    except Exception:
         if conexao:
             conexao.rollback()
         print("--- ERRO EM /api/perfis/me (PUT) ---")
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=f"Erro detalhado no servidor: {str(err)}"
+            detail="Não foi possível atualizar o perfil. Tente novamente."
         )
+    finally:
+        if cursor:
+            cursor.close()
+        if conexao:
+            conexao.close()
+
+
+
+
+# ============================================================
+# MENSAGENS E CONVERSAS REAIS
+# ============================================================
+
+@app.get("/api/conversas", tags=["Mensagens"])
+def listar_conversas(current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        usuario_id = current_user["id"]
+        cursor.execute("""
+            SELECT
+                c.id,
+                c.contratante_id,
+                c.artista_id,
+                c.servico_id,
+                CASE WHEN c.contratante_id = %s THEN c.artista_id ELSE c.contratante_id END AS outro_usuario_id,
+                COALESCE(pa.nome_artistico, p.nome_completo, u.email, 'Usuário') AS nome,
+                p.foto_perfil_url AS foto_perfil,
+                COALESCE((
+                    SELECT m.conteudo FROM mensagens m
+                    WHERE m.conversa_id = c.id
+                    ORDER BY m.criado_em DESC, m.id DESC LIMIT 1
+                ), '') AS ultima_mensagem,
+                (
+                    SELECT m.criado_em FROM mensagens m
+                    WHERE m.conversa_id = c.id
+                    ORDER BY m.criado_em DESC, m.id DESC LIMIT 1
+                ) AS ultima_mensagem_em,
+                (
+                    SELECT COUNT(*) FROM mensagens m
+                    WHERE m.conversa_id = c.id
+                      AND m.remetente_id <> %s
+                      AND m.lida = 0
+                ) AS nao_lidas
+            FROM conversas c
+            INNER JOIN usuarios u ON u.id = CASE
+                WHEN c.contratante_id = %s THEN c.artista_id ELSE c.contratante_id END
+            LEFT JOIN perfis p ON p.usuario_id = u.id
+            LEFT JOIN perfis_artista pa ON pa.usuario_id = u.id
+            WHERE c.contratante_id = %s OR c.artista_id = %s
+            ORDER BY COALESCE(
+                (SELECT m2.criado_em FROM mensagens m2
+                 WHERE m2.conversa_id = c.id
+                 ORDER BY m2.criado_em DESC, m2.id DESC LIMIT 1),
+                c.criado_em
+            ) DESC
+        """, (usuario_id, usuario_id, usuario_id, usuario_id, usuario_id))
+        rows = cursor.fetchall()
+        for row in rows:
+            if row.get("ultima_mensagem_em"):
+                row["ultima_mensagem_em"] = row["ultima_mensagem_em"].isoformat()
+            row["nao_lidas"] = int(row.get("nao_lidas") or 0)
+        return {"conversas": rows}
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível carregar as conversas.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.post("/api/conversas", tags=["Mensagens"])
+def criar_ou_obter_conversa(dados: ConversaCreate, current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        usuario_id = current_user["id"]
+        if usuario_id == dados.artista_id:
+            raise HTTPException(status_code=400, detail="Você não pode iniciar uma conversa consigo mesmo.")
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("SELECT usuario_id FROM perfis_artista WHERE usuario_id = %s", (dados.artista_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Perfil de artista não encontrado.")
+        cursor.execute("""
+            SELECT id FROM conversas
+            WHERE (contratante_id = %s AND artista_id = %s)
+               OR (contratante_id = %s AND artista_id = %s)
+            ORDER BY id DESC LIMIT 1
+        """, (usuario_id, dados.artista_id, dados.artista_id, usuario_id))
+        row = cursor.fetchone()
+        if row:
+            conversa_id = int(row["id"])
+        else:
+            cursor.execute("""
+                INSERT INTO conversas (contratante_id, artista_id, servico_id)
+                VALUES (%s, %s, %s)
+            """, (usuario_id, dados.artista_id, dados.servico_id))
+            conexao.commit()
+            conversa_id = int(cursor.lastrowid)
+        return {"status": "sucesso", "conversa_id": conversa_id}
+    except HTTPException:
+        if conexao: conexao.rollback()
+        raise
+    except Exception:
+        if conexao: conexao.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível iniciar a conversa.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.get("/api/conversas/{conversa_id}/mensagens", tags=["Mensagens"])
+def listar_mensagens(conversa_id: int, current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        usuario_id = current_user["id"]
+        cursor.execute("""
+            SELECT id FROM conversas
+            WHERE id = %s AND (contratante_id = %s OR artista_id = %s)
+        """, (conversa_id, usuario_id, usuario_id))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+        cursor.execute("""
+            UPDATE mensagens SET lida = 1
+            WHERE conversa_id = %s AND remetente_id <> %s AND lida = 0
+        """, (conversa_id, usuario_id))
+        conexao.commit()
+        cursor.execute("""
+            SELECT id, conversa_id, remetente_id, conteudo, criado_em, lida
+            FROM mensagens WHERE conversa_id = %s
+            ORDER BY criado_em ASC, id ASC
+        """, (conversa_id,))
+        rows = cursor.fetchall()
+        for row in rows:
+            row["id"] = str(row["id"])
+            row["fromMe"] = int(row["remetente_id"]) == usuario_id
+            row["text"] = row["conteudo"]
+            row["time"] = row["criado_em"].strftime("%H:%M") if row.get("criado_em") else ""
+            row["criado_em"] = row["criado_em"].isoformat() if row.get("criado_em") else None
+        return {"mensagens": rows}
+    except HTTPException:
+        raise
+    except Exception:
+        if conexao: conexao.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível carregar as mensagens.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.post("/api/conversas/{conversa_id}/mensagens", tags=["Mensagens"])
+def enviar_mensagem(conversa_id: int, dados: MensagemCreate, current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        conteudo = dados.conteudo.strip()
+        if not conteudo:
+            raise HTTPException(status_code=400, detail="Digite uma mensagem antes de enviar.")
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        usuario_id = current_user["id"]
+        cursor.execute("""
+            SELECT id FROM conversas
+            WHERE id = %s AND (contratante_id = %s OR artista_id = %s)
+        """, (conversa_id, usuario_id, usuario_id))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+        cursor.execute("""
+            INSERT INTO mensagens (conversa_id, remetente_id, conteudo)
+            VALUES (%s, %s, %s)
+        """, (conversa_id, usuario_id, conteudo))
+        conexao.commit()
+        message_id = cursor.lastrowid
+        cursor.execute("""
+            SELECT id, conversa_id, remetente_id, conteudo, criado_em, lida
+            FROM mensagens WHERE id = %s
+        """, (message_id,))
+        row = cursor.fetchone()
+        row["id"] = str(row["id"])
+        row["fromMe"] = True
+        row["text"] = row["conteudo"]
+        row["time"] = row["criado_em"].strftime("%H:%M") if row.get("criado_em") else ""
+        row["criado_em"] = row["criado_em"].isoformat() if row.get("criado_em") else None
+        return {"status": "sucesso", "mensagem": row}
+    except HTTPException:
+        if conexao: conexao.rollback()
+        raise
+    except Exception:
+        if conexao: conexao.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível enviar a mensagem.")
     finally:
         if cursor: cursor.close()
         if conexao: conexao.close()
@@ -804,6 +1088,9 @@ def tornar_se_artista(dados_artista: PerfilArtistaCreate, current_user: dict = D
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail="Este usuário já possui um perfil de artista.")
 
+        if dados_artista.preco_min is not None and dados_artista.preco_max is not None and dados_artista.preco_max < dados_artista.preco_min:
+            raise HTTPException(status_code=400, detail="O preço máximo não pode ser menor que o preço mínimo.")
+
         query = """
             INSERT INTO perfis_artista (usuario_id, nome_artistico, biografia, anos_experiencia, modalidade_atendimento, cidade_atendimento, estado_atendimento)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -813,6 +1100,13 @@ def tornar_se_artista(dados_artista: PerfilArtistaCreate, current_user: dict = D
             dados_artista.anos_experiencia, dados_artista.modalidade_atendimento,
             dados_artista.cidade_atendimento, dados_artista.estado_atendimento
         ))
+        if dados_artista.preco_min is not None or dados_artista.preco_max is not None:
+            preco_min = dados_artista.preco_min if dados_artista.preco_min is not None else dados_artista.preco_max
+            preco_max = dados_artista.preco_max if dados_artista.preco_max is not None else dados_artista.preco_min
+            cursor.execute("""
+                INSERT INTO servicos (artista_id, titulo, descricao, preco_min, preco_max, prazo_estimado_dias, modalidade)
+                VALUES (%s, %s, %s, %s, %s, NULL, %s)
+            """, (usuario_id, "Apresentação artística", "Valor inicial informado no cadastro do perfil artístico.", preco_min, preco_max, dados_artista.modalidade_atendimento))
         conexao.commit()
         return {"status": "sucesso", "mensagem": "Perfil de artista criado com sucesso"}
     except HTTPException as he:
@@ -825,6 +1119,58 @@ def tornar_se_artista(dados_artista: PerfilArtistaCreate, current_user: dict = D
             status_code=500,
             detail=f"Erro detalhado no banco de dados: {str(err)}"
         )
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+class PrecoArtistaUpdate(BaseModel):
+    preco_min: Optional[float] = Field(None, ge=0)
+    preco_max: Optional[float] = Field(None, ge=0)
+
+
+@app.put("/api/artistas/me/preco", tags=["Artista"])
+def atualizar_preco_artista(dados: PrecoArtistaUpdate, current_user: dict = Depends(get_usuario_atual)):
+    """Atualiza a faixa de preço pública do artista no serviço de referência."""
+    usuario_id = current_user["id"]
+    if dados.preco_min is not None and dados.preco_max is not None and dados.preco_max < dados.preco_min:
+        raise HTTPException(status_code=422, detail="O preço máximo não pode ser menor que o preço mínimo.")
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("SELECT usuario_id FROM perfis_artista WHERE usuario_id = %s", (usuario_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=403, detail="É necessário ter um perfil de artista.")
+
+        # O cadastro de artista cria um serviço de referência. Se ainda não existir,
+        # cria-o; caso exista, atualiza somente o primeiro serviço para manter o valor editável.
+        cursor.execute("SELECT id FROM servicos WHERE artista_id = %s ORDER BY id ASC LIMIT 1", (usuario_id,))
+        servico = cursor.fetchone()
+        preco_min = dados.preco_min
+        preco_max = dados.preco_max
+        if preco_min is None and preco_max is not None:
+            preco_min = preco_max
+        if preco_max is None and preco_min is not None:
+            preco_max = preco_min
+        if servico:
+            cursor.execute("UPDATE servicos SET preco_min = %s, preco_max = %s WHERE id = %s AND artista_id = %s",
+                           (preco_min, preco_max, servico["id"], usuario_id))
+        elif preco_min is not None or preco_max is not None:
+            cursor.execute("""INSERT INTO servicos (artista_id, titulo, descricao, preco_min, preco_max, modalidade)
+                              VALUES (%s, %s, %s, %s, %s, %s)""",
+                           (usuario_id, "Apresentação artística", "Valor de referência dos serviços artísticos.", preco_min, preco_max, "ambos"))
+        conexao.commit()
+        return {"status": "sucesso", "mensagem": "Preço atualizado com sucesso."}
+    except HTTPException:
+        if conexao: conexao.rollback()
+        raise
+    except Exception as err:
+        if conexao: conexao.rollback()
+        print("--- ERRO EM /api/artistas/me/preco (PUT) ---")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível atualizar o preço do artista.")
     finally:
         if cursor: cursor.close()
         if conexao: conexao.close()
@@ -865,6 +1211,106 @@ def criar_servico_artista(servico: ServicoCreate, current_user: dict = Depends(g
             status_code=500,
             detail=f"Erro detalhado no servidor: {str(err)}"
         )
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.get("/api/artistas/{artista_id}/portfolio", tags=["Artista"])
+def listar_portfolio_publico(artista_id: int):
+    """Retorna os itens publicados do portfólio de um artista."""
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT p.id, p.titulo, p.descricao, p.tipo, p.ordem,
+                   i.id AS item_id, i.tipo_midia, i.midia_url, i.titulo AS item_titulo,
+                   i.descricao AS item_descricao
+            FROM portfolios p
+            LEFT JOIN itens_portfolio i ON i.portfolio_id = p.id
+            WHERE p.artista_id = %s AND p.publicado = TRUE
+            ORDER BY p.ordem ASC, p.criado_em DESC, i.ordem ASC, i.criado_em ASC
+        """, (artista_id,))
+        rows = cursor.fetchall()
+        items = []
+        for row in rows:
+            items.append({
+                "id": row["item_id"] or row["id"],
+                "portfolio_id": row["id"],
+                "titulo": row["item_titulo"] or row["titulo"],
+                "descricao": row["item_descricao"] or row["descricao"] or "",
+                "tipo": row["tipo_midia"] or row["tipo"],
+                "midia_url": row["midia_url"] or "",
+            })
+        return {"portfolio": items}
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível carregar o portfólio.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.get("/api/me/portfolio", tags=["Artista"])
+def listar_meu_portfolio(current_user: dict = Depends(get_usuario_atual)):
+    return listar_portfolio_publico(int(current_user["id"]))
+
+
+@app.post("/api/artistas/portfolio", tags=["Artista"])
+def criar_item_portfolio(item: PortfolioCreate, current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        artista_id = int(current_user["id"])
+        cursor.execute("SELECT usuario_id FROM perfis_artista WHERE usuario_id = %s", (artista_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=403, detail="É necessário ter um perfil de artista.")
+        cursor.execute("""
+            INSERT INTO portfolios (artista_id, titulo, descricao, tipo, ordem, publicado)
+            VALUES (%s, %s, %s, 'projeto', 0, TRUE)
+        """, (artista_id, item.titulo.strip(), item.descricao))
+        portfolio_id = cursor.lastrowid
+        cursor.execute("""
+            INSERT INTO itens_portfolio (portfolio_id, tipo_midia, midia_url, titulo, descricao, ordem)
+            VALUES (%s, 'texto', 'texto://', %s, %s, 0)
+        """, (portfolio_id, item.titulo.strip(), item.descricao))
+        conexao.commit()
+        return {"status": "sucesso", "id": portfolio_id, "titulo": item.titulo.strip(), "descricao": item.descricao or "", "tipo": "texto", "midia_url": "texto://"}
+    except HTTPException:
+        if conexao: conexao.rollback()
+        raise
+    except Exception:
+        if conexao: conexao.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível salvar o item do portfólio.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.delete("/api/artistas/portfolio/{portfolio_id}", tags=["Artista"])
+def excluir_item_portfolio(portfolio_id: int, current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("DELETE FROM portfolios WHERE id = %s AND artista_id = %s", (portfolio_id, int(current_user["id"])))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Item não encontrado.")
+        conexao.commit()
+        return {"status": "sucesso"}
+    except HTTPException:
+        if conexao: conexao.rollback()
+        raise
+    except Exception:
+        if conexao: conexao.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível excluir o item do portfólio.")
     finally:
         if cursor: cursor.close()
         if conexao: conexao.close()
