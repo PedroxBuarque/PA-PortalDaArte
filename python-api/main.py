@@ -72,7 +72,7 @@ def get_db_connection():
     return mysql.connector.connect(
         host=os.getenv("DB_HOST", "127.0.0.1"),
         user=os.getenv("DB_USER", "root"),
-        password=os.getenv("DB_PASSWORD", ""),
+        password=os.getenv("DB_PASSWORD", "root"),
         database=os.getenv("DB_NAME", "portal_da_arte")
     )
 
@@ -108,6 +108,7 @@ class PerfilUpdate(BaseModel):
     cnpj: Optional[str] = None
     foto_perfil: Optional[str] = None  # Recebe a imagem codificada em Base64
     biografia: Optional[str] = None
+    categoria_atuacao: Optional[str] = Field(None, max_length=100)
 
 class PerfilArtistaCreate(BaseModel):
     nome_artistico: str
@@ -116,6 +117,7 @@ class PerfilArtistaCreate(BaseModel):
     modalidade_atendimento: str = "ambos"
     cidade_atendimento: Optional[str] = None
     estado_atendimento: Optional[str] = None
+    categoria_atuacao: Optional[str] = Field(None, max_length=100)
     preco_min: Optional[float] = Field(None, ge=0)
     preco_max: Optional[float] = Field(None, ge=0)
 
@@ -130,6 +132,20 @@ class ServicoCreate(BaseModel):
     preco_max: Optional[float] = None
     prazo_estimado_dias: Optional[int] = None
     modalidade: str = "ambos"
+
+class ServicoPerfilItem(BaseModel):
+    id: Optional[int] = None
+    titulo: str = Field(..., min_length=1, max_length=150)
+    descricao: Optional[str] = None
+    preco_min: Optional[float] = Field(None, ge=0)
+    preco_max: Optional[float] = Field(None, ge=0)
+    modalidade: str = "ambos"
+
+class DetalhesArtistaUpdate(BaseModel):
+    nome_artistico: Optional[str] = Field(None, max_length=80)
+    categorias: List[str] = []
+    servicos: List[ServicoPerfilItem] = []
+    modalidade_atendimento: str = "ambos"
 
 class PropostaCreate(BaseModel):
     conversa_id: int
@@ -565,7 +581,7 @@ def obter_perfil_logado(current_user: dict = Depends(get_usuario_atual)):
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
         cursor.execute("""
-            SELECT nome_artistico, biografia, anos_experiencia, modalidade_atendimento, cidade_atendimento, estado_atendimento
+            SELECT nome_artistico, biografia, anos_experiencia, modalidade_atendimento, cidade_atendimento, estado_atendimento, categoria_atuacao
             FROM perfis_artista 
             WHERE usuario_id = %s
         """, (usuario_id,))
@@ -579,6 +595,7 @@ def obter_perfil_logado(current_user: dict = Depends(get_usuario_atual)):
         is_artista = False
         nome_artistico = None
         biografia = None
+        categoria_atuacao = None
         estatisticas = {
             "avaliacao_media": "0.0",
             "total_contratacoes": 0,
@@ -589,6 +606,7 @@ def obter_perfil_logado(current_user: dict = Depends(get_usuario_atual)):
             is_artista = True
             nome_artistico = artista["nome_artistico"]
             biografia = artista["biografia"]
+            categoria_atuacao = artista.get("categoria_atuacao")
 
             try:
                 cursor.execute("SELECT COUNT(*) as total FROM contratos WHERE artista_id = %s", (usuario_id,))
@@ -618,6 +636,7 @@ def obter_perfil_logado(current_user: dict = Depends(get_usuario_atual)):
             "is_artista": is_artista,  # Retorna True apenas se o usuário tiver perfil de artista
             "nome_artistico": nome_artistico,
             "biografia": biografia,
+            "categoria_atuacao": categoria_atuacao,
             "preco_min": float(precos_artista["preco_min"]) if precos_artista.get("preco_min") is not None else None,
             "preco_max": float(precos_artista["preco_max"]) if precos_artista.get("preco_max") is not None else None,
             "estatisticas": estatisticas
@@ -731,6 +750,11 @@ def atualizar_perfil_logado(perfil: PerfilUpdate, current_user: dict = Depends(g
             cursor.execute(
                 "UPDATE perfis_artista SET biografia = %s WHERE usuario_id = %s",
                 (perfil.biografia, usuario_id)
+            )
+        if perfil.categoria_atuacao is not None:
+            cursor.execute(
+                "UPDATE perfis_artista SET categoria_atuacao = %s WHERE usuario_id = %s",
+                (perfil.categoria_atuacao.strip() or None, usuario_id)
             )
 
         conexao.commit()
@@ -1092,13 +1116,14 @@ def tornar_se_artista(dados_artista: PerfilArtistaCreate, current_user: dict = D
             raise HTTPException(status_code=400, detail="O preço máximo não pode ser menor que o preço mínimo.")
 
         query = """
-            INSERT INTO perfis_artista (usuario_id, nome_artistico, biografia, anos_experiencia, modalidade_atendimento, cidade_atendimento, estado_atendimento)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO perfis_artista (usuario_id, nome_artistico, biografia, anos_experiencia, modalidade_atendimento, cidade_atendimento, estado_atendimento, categoria_atuacao)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """
         cursor.execute(query, (
             usuario_id, dados_artista.nome_artistico, dados_artista.biografia,
             dados_artista.anos_experiencia, dados_artista.modalidade_atendimento,
-            dados_artista.cidade_atendimento, dados_artista.estado_atendimento
+            dados_artista.cidade_atendimento, dados_artista.estado_atendimento,
+            dados_artista.categoria_atuacao.strip() if dados_artista.categoria_atuacao else None
         ))
         if dados_artista.preco_min is not None or dados_artista.preco_max is not None:
             preco_min = dados_artista.preco_min if dados_artista.preco_min is not None else dados_artista.preco_max
@@ -1146,7 +1171,7 @@ def atualizar_preco_artista(dados: PrecoArtistaUpdate, current_user: dict = Depe
 
         # O cadastro de artista cria um serviço de referência. Se ainda não existir,
         # cria-o; caso exista, atualiza somente o primeiro serviço para manter o valor editável.
-        cursor.execute("SELECT id FROM servicos WHERE artista_id = %s ORDER BY id ASC LIMIT 1", (usuario_id,))
+        cursor.execute("SELECT id FROM servicos WHERE artista_id = %s AND ativo = TRUE ORDER BY id ASC LIMIT 1", (usuario_id,))
         servico = cursor.fetchone()
         preco_min = dados.preco_min
         preco_max = dados.preco_max
@@ -1211,6 +1236,123 @@ def criar_servico_artista(servico: ServicoCreate, current_user: dict = Depends(g
             status_code=500,
             detail=f"Erro detalhado no servidor: {str(err)}"
         )
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.get("/api/artistas/me/detalhes", tags=["Artista"])
+def obter_detalhes_artista(current_user: dict = Depends(get_usuario_atual)):
+    """Lista as categorias/estilos e serviços editáveis do artista autenticado."""
+    usuario_id = current_user["id"]
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("SELECT usuario_id, nome_artistico, modalidade_atendimento FROM perfis_artista WHERE usuario_id = %s", (usuario_id,))
+        perfil_artista = cursor.fetchone()
+        if not perfil_artista:
+            raise HTTPException(status_code=403, detail="É necessário ter um perfil de artista.")
+        cursor.execute("""SELECT c.nome FROM artista_categorias ac
+                          INNER JOIN categorias c ON c.id = ac.categoria_id
+                          WHERE ac.artista_id = %s AND c.ativo = TRUE ORDER BY c.nome""", (usuario_id,))
+        categorias = [row["nome"] for row in cursor.fetchall()]
+        cursor.execute("""SELECT id, titulo, descricao, preco_min, preco_max, modalidade FROM servicos
+                          WHERE artista_id = %s AND ativo = TRUE ORDER BY id ASC""", (usuario_id,))
+        servicos = cursor.fetchall()
+        return {"categorias": categorias, "servicos": servicos, "modalidade_atendimento": perfil_artista.get("modalidade_atendimento") or "ambos", "nome_artistico": perfil_artista.get("nome_artistico") or ""}
+    except HTTPException:
+        raise
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível carregar os serviços e categorias.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.put("/api/artistas/me/detalhes", tags=["Artista"])
+def atualizar_detalhes_artista(dados: DetalhesArtistaUpdate, current_user: dict = Depends(get_usuario_atual)):
+    """Atualiza categorias/estilos e lista de serviços mostrados no perfil público."""
+    usuario_id = current_user["id"]
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("SELECT usuario_id FROM perfis_artista WHERE usuario_id = %s", (usuario_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=403, detail="É necessário ter um perfil de artista.")
+
+        modalidade_artista = dados.modalidade_atendimento if dados.modalidade_atendimento in ("presencial", "remoto", "ambos") else "ambos"
+        nome_artistico = (dados.nome_artistico or "").strip()[:80]
+        cursor.execute("UPDATE perfis_artista SET modalidade_atendimento = %s, nome_artistico = %s WHERE usuario_id = %s", (modalidade_artista, nome_artistico or None, usuario_id))
+
+        # Normaliza categorias e evita duplicatas sem diferenciar maiúsculas/minúsculas.
+        categorias = []
+        seen = set()
+        for nome in dados.categorias:
+            nome = (nome or "").strip()[:100]
+            if nome and nome.casefold() not in seen:
+                categorias.append(nome)
+                seen.add(nome.casefold())
+        cursor.execute("DELETE FROM artista_categorias WHERE artista_id = %s", (usuario_id,))
+        for nome in categorias:
+            cursor.execute("SELECT id FROM categorias WHERE LOWER(nome) = LOWER(%s) LIMIT 1", (nome,))
+            categoria = cursor.fetchone()
+            if not categoria:
+                cursor.execute("INSERT INTO categorias (nome, descricao, ativo) VALUES (%s, %s, TRUE)", (nome, "Categoria/estilo informado pelo artista"))
+                categoria_id = cursor.lastrowid
+            else:
+                categoria_id = categoria["id"]
+            cursor.execute("INSERT IGNORE INTO artista_categorias (artista_id, categoria_id) VALUES (%s, %s)", (usuario_id, categoria_id))
+
+        # Atualiza serviços enviados, cria os novos e desativa os removidos para preservar históricos/contratos.
+        enviados = set()
+        for item in dados.servicos:
+            titulo = item.titulo.strip()
+            if not titulo:
+                continue
+            descricao = (item.descricao or "").strip() or None
+            modalidade = item.modalidade if item.modalidade in ("presencial", "remoto", "ambos") else "ambos"
+            if item.id:
+                cursor.execute("SELECT id FROM servicos WHERE id = %s AND artista_id = %s", (item.id, usuario_id))
+                existente = cursor.fetchone()
+            else:
+                existente = None
+            if existente:
+                if item.preco_min is not None and item.preco_max is not None and item.preco_max < item.preco_min:
+                    raise HTTPException(status_code=400, detail=f"O valor máximo do serviço '{titulo}' não pode ser menor que o mínimo.")
+                cursor.execute("UPDATE servicos SET titulo = %s, descricao = %s, preco_min = %s, preco_max = %s, modalidade = %s, ativo = TRUE WHERE id = %s AND artista_id = %s",
+                               (titulo, descricao, item.preco_min, item.preco_max, modalidade, item.id, usuario_id))
+                enviados.add(item.id)
+            else:
+                if item.preco_min is not None and item.preco_max is not None and item.preco_max < item.preco_min:
+                    raise HTTPException(status_code=400, detail=f"O valor máximo do serviço '{titulo}' não pode ser menor que o mínimo.")
+                cursor.execute("INSERT INTO servicos (artista_id, titulo, descricao, preco_min, preco_max, modalidade, ativo) VALUES (%s, %s, %s, %s, %s, %s, TRUE)",
+                               (usuario_id, titulo, descricao, item.preco_min, item.preco_max, modalidade))
+                enviados.add(cursor.lastrowid)
+        cursor.execute("SELECT id FROM servicos WHERE artista_id = %s AND ativo = TRUE", (usuario_id,))
+        ids_ativos = [row["id"] for row in cursor.fetchall()]
+        removidos = [item_id for item_id in ids_ativos if item_id not in enviados]
+        if removidos:
+            placeholders = ",".join(["%s"] * len(removidos))
+            cursor.execute(f"UPDATE servicos SET ativo = FALSE WHERE artista_id = %s AND id IN ({placeholders})", tuple([usuario_id] + removidos))
+
+        conexao.commit()
+        cursor.execute("""SELECT c.nome FROM artista_categorias ac INNER JOIN categorias c ON c.id = ac.categoria_id
+                          WHERE ac.artista_id = %s AND c.ativo = TRUE ORDER BY c.nome""", (usuario_id,))
+        categorias_salvas = [row["nome"] for row in cursor.fetchall()]
+        cursor.execute("SELECT id, titulo, descricao, preco_min, preco_max, modalidade FROM servicos WHERE artista_id = %s AND ativo = TRUE ORDER BY id ASC", (usuario_id,))
+        return {"status": "sucesso", "categorias": categorias_salvas, "servicos": cursor.fetchall()}
+    except HTTPException:
+        if conexao: conexao.rollback()
+        raise
+    except Exception:
+        if conexao: conexao.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível salvar os serviços e categorias.")
     finally:
         if cursor: cursor.close()
         if conexao: conexao.close()

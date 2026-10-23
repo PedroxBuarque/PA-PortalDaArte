@@ -17,6 +17,8 @@ import { router, usePathname } from 'expo-router';
 export default function Header() {
   const [isMenuVisible, setIsMenuVisible] = useState(false);
   const [isAvatarMenuVisible, setIsAvatarMenuVisible] = useState(false);
+  const [isNotificationsVisible, setIsNotificationsVisible] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState<any[]>([]);
   const [userName, setUserName] = useState('U');
   
   // Variáveis restauradas que corrigem o erro
@@ -28,6 +30,20 @@ export default function Header() {
   const { isLightMode, toggleTheme, theme } = useTheme();
   
   const styles = getStyles(theme);
+
+  const formatNotificationDate = (rawDate: any) => {
+    if (!rawDate) return 'Data indisponível';
+    const date = new Date(rawDate);
+    if (Number.isNaN(date.getTime())) return 'Data indisponível';
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const messageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const daysAgo = Math.round((today.getTime() - messageDay.getTime()) / 86400000);
+    if (daysAgo === 0) return `Hoje, ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    if (daysAgo === 1) return `Ontem, ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    if (daysAgo > 1 && daysAgo < 7) return `${date.toLocaleDateString('pt-BR', { weekday: 'short' })}, ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    return `${date.toLocaleDateString('pt-BR')} · ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  };
 
   // Busca os dados do usuário ao abrir o header/trocar de tela e escuta alterações salvas no perfil.
   useEffect(() => {
@@ -70,6 +86,46 @@ export default function Header() {
     );
 
     return () => profileUpdatedSubscription.remove();
+  }, [pathname]);
+
+  // Busca conversas com mensagens não lidas para alimentar o marcador e o dropdown.
+  useEffect(() => {
+    let active = true;
+
+    const fetchUnreadNotifications = async () => {
+      try {
+        const token = await AsyncStorage.getItem('access_token');
+        if (!token) {
+          if (active) setUnreadNotifications([]);
+          return;
+        }
+
+        const response = await fetch(`${URL_API}/api/conversas`, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        });
+        if (!response.ok) return;
+        const result = await response.json();
+        const conversations = Array.isArray(result.conversas) ? result.conversas : [];
+        const unread = conversations
+          .filter((conversation: any) => Number(conversation.nao_lidas) > 0)
+          .map((conversation: any) => ({
+            id: String(conversation.id),
+            nome: conversation.nome || 'Nova mensagem',
+            quantidade: Number(conversation.nao_lidas),
+            dataMensagem: conversation.ultima_mensagem_em || conversation.data_ultima_mensagem || conversation.last_message_at || conversation.updated_at || conversation.criado_em || conversation.created_at || null,
+          }));
+        if (active) setUnreadNotifications(unread);
+      } catch (error) {
+        console.error('Erro ao buscar notificações:', error);
+      }
+    };
+
+    fetchUnreadNotifications();
+    const interval = setInterval(fetchUnreadNotifications, 30000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, [pathname]);
 
   // Atualiza os parâmetros da tela atual sem navegar/remontar a tela
@@ -122,8 +178,14 @@ export default function Header() {
       </View>
 
       <View style={styles.rightIcons}>
-        <TouchableOpacity style={styles.iconButton}>
+        <TouchableOpacity
+          style={styles.iconButton}
+          onPress={() => setIsNotificationsVisible(!isNotificationsVisible)}
+          activeOpacity={0.8}
+          accessibilityLabel={unreadNotifications.length ? 'Notificações, há mensagens não lidas' : 'Notificações'}
+        >
           <Bell size={20} color={theme.textSecondary} />
+          {unreadNotifications.length > 0 && <View style={styles.notificationDot} />}
         </TouchableOpacity>
         
         <TouchableOpacity 
@@ -150,6 +212,56 @@ export default function Header() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Dropdown de notificações */}
+      <Modal
+        visible={isNotificationsVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsNotificationsVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsNotificationsVisible(false)}
+        >
+          <TouchableOpacity activeOpacity={1} style={[styles.dropdownMenu, styles.notificationsMenu]}>
+            <View style={styles.notificationsHeader}>
+              <Text style={[styles.dropdownText, { fontWeight: '700' }]}>Notificações</Text>
+              {unreadNotifications.length > 0 && (
+                <View style={styles.notificationCount}>
+                  <Text style={styles.notificationCountText}>{unreadNotifications.length}</Text>
+                </View>
+              )}
+            </View>
+            {unreadNotifications.length > 0 ? unreadNotifications.slice(0, 6).map((notification) => (
+              <TouchableOpacity
+                key={notification.id}
+                style={styles.notificationItem}
+                onPress={() => {
+                  setIsNotificationsVisible(false);
+                  router.push('/pages/mensagens/mensagens' as any);
+                }}
+              >
+                <View style={styles.notificationBullet} />
+                <View style={styles.notificationCopy}>
+                  <View style={styles.notificationTitleRow}>
+                    <Text style={styles.notificationTitle} numberOfLines={1}>Você tem mensagens não lidas</Text>
+                    <Text style={styles.notificationDate}>{formatNotificationDate(notification.dataMensagem)}</Text>
+                  </View>
+                  <Text style={styles.notificationSubtitle} numberOfLines={1}>
+                    {notification.nome}{notification.quantidade > 1 ? ` · ${notification.quantidade} mensagens` : ' enviou uma mensagem'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            )) : (
+              <View style={styles.emptyNotifications}>
+                <Text style={styles.notificationSubtitle}>Você não tem notificações novas.</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Menu da Engrenagem */}
       <Modal
@@ -262,6 +374,91 @@ const getStyles = (theme: any) => StyleSheet.create({
   },
   iconButton: {
     padding: 4,
+    position: 'relative',
+  },
+  notificationDot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: '#E05A10',
+    borderWidth: 1.5,
+    borderColor: theme.headerBg,
+  },
+  notificationsMenu: {
+    width: 300,
+    maxWidth: 340,
+    right: 92,
+    paddingVertical: 4,
+  },
+  notificationsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.borderColor,
+  },
+  notificationCount: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E05A10',
+  },
+  notificationCountText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  notificationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.borderColor,
+  },
+  notificationBullet: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#E05A10',
+  },
+  notificationCopy: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  notificationTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  notificationDate: {
+    color: theme.textSecondary,
+    fontSize: 10,
+    flexShrink: 0,
+  },
+  notificationTitle: {
+    color: theme.textPrimary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  notificationSubtitle: {
+    color: theme.textSecondary,
+    fontSize: 11,
+  },
+  emptyNotifications: {
+    paddingHorizontal: 16,
+    paddingVertical: 18,
   },
   userAvatar: {
     width: 32,
