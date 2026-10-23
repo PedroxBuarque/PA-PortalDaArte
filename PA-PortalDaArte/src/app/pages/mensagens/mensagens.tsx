@@ -64,6 +64,7 @@ type Mensagem = {
   fromMe: boolean;
   text: string;
   time: string;
+  criadoEm?: string | null;
   mediaUri?: string | null;
   mediaType?: 'image' | 'video' | null;
 };
@@ -83,6 +84,7 @@ export default function MensagensScreen() {
   const openedTargetRef = useRef<string | null>(null);
   const [messageText, setMessageText] = useState('');
   const [messagesData, setMessagesData] = useState<Record<string, Mensagem[]>>({});
+  const messagesScrollRef = useRef<ScrollView | null>(null);
   const [midiaAnexada, setMidiaAnexada] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
   
   // Estados de visualização e menus de mensagens
@@ -195,6 +197,7 @@ export default function MensagensScreen() {
             fromMe: Boolean(row.fromMe),
             text: String(row.text ?? row.conteudo ?? ''),
             time: String(row.time || ''),
+            criadoEm: row.criado_em || row.created_at || row.createdAt || null,
           })),
         }));
         if (active) setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, unread: 0 } : c));
@@ -257,8 +260,11 @@ export default function MensagensScreen() {
         fromMe: true,
         text: String(row.text ?? row.conteudo ?? content),
         time: String(row.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
+        criadoEm: row.criado_em || new Date().toISOString(),
       };
       setMessagesData((prev) => ({ ...prev, [selectedId]: [...(prev[selectedId] || []), novaMensagem] }));
+      // Rola somente após o envio bem-sucedido, não durante o carregamento inicial da conversa.
+      setTimeout(() => messagesScrollRef.current?.scrollToEnd({ animated: true }), 100);
       setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, lastMessage: content, time: novaMensagem.time } : c));
       setMessageText('');
       setRequestError('');
@@ -401,19 +407,43 @@ export default function MensagensScreen() {
                   </View>
 
                   <ScrollView
+                    ref={messagesScrollRef}
                     style={styles.messagesScroll}
                     contentContainerStyle={styles.messagesScrollContent}
                     showsVerticalScrollIndicator={false}
                   >
                     {loadingMessages && messages.length === 0 ? <Text style={styles.pageSubtitle}>Carregando mensagens...</Text> : null}
                     {!loadingMessages && messages.length === 0 ? <Text style={styles.pageSubtitle}>Ainda não há mensagens. Envie a primeira!</Text> : null}
-                    {messages.map((msg) => {
+                    {messages.map((msg, index) => {
                       const isHovered = hoveredMessageId === msg.id;
                       const isMenuOpen = activeMenuMessageId === msg.id;
+                      const msgDate = msg.criadoEm ? new Date(msg.criadoEm) : null;
+                      const previousDate = index > 0 && messages[index - 1].criadoEm
+                        ? new Date(messages[index - 1].criadoEm as string) : null;
+                      const dayKey = msgDate && !Number.isNaN(msgDate.getTime())
+                        ? `${msgDate.getFullYear()}-${msgDate.getMonth()}-${msgDate.getDate()}` : null;
+                      const previousDayKey = previousDate && !Number.isNaN(previousDate.getTime())
+                        ? `${previousDate.getFullYear()}-${previousDate.getMonth()}-${previousDate.getDate()}` : null;
+                      const showDateDivider = !!dayKey && dayKey !== previousDayKey;
+                      const today = new Date();
+                      const yesterday = new Date();
+                      yesterday.setDate(today.getDate() - 1);
+                      const labelDate = msgDate && dayKey
+                        ? dayKey === `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`
+                          ? 'Hoje'
+                          : dayKey === `${yesterday.getFullYear()}-${yesterday.getMonth()}-${yesterday.getDate()}`
+                            ? 'Ontem'
+                            : msgDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
+                        : '';
 
                       return (
-                        <View
-                          key={msg.id}
+                        <React.Fragment key={msg.id}>
+                          {showDateDivider && (
+                            <View style={styles.messageDateDivider}>
+                              <Text style={styles.messageDateDividerText}>{labelDate}</Text>
+                            </View>
+                          )}
+                          <View
                           style={[
                             styles.bubbleRow,
                             msg.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft,
@@ -513,6 +543,7 @@ export default function MensagensScreen() {
                           </View>
                           <Text style={styles.bubbleTime}>{msg.time}</Text>
                         </View>
+                        </React.Fragment>
                       );
                     })}
                   </ScrollView>
@@ -823,6 +854,22 @@ const getStyles = (theme: any) =>
     },
     messagesScrollContent: {
       paddingVertical: 16,
+    },
+    messageDateDivider: {
+      alignSelf: 'center',
+      paddingHorizontal: 14,
+      paddingVertical: 6,
+      marginTop: 8,
+      marginBottom: 18,
+      borderRadius: 12,
+      backgroundColor: theme.cardBg,
+      borderWidth: 1,
+      borderColor: theme.borderColor,
+    },
+    messageDateDividerText: {
+      color: theme.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
     },
     bubbleRow: {
       marginBottom: 14,

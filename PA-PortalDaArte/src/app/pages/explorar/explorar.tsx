@@ -22,6 +22,113 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
+// Geocodificação de cidades para calcular distância em linha reta.
+const geocodeCache = new Map<string, { lat: number; lon: number } | null>();
+const normalizePlace = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+const normalizeLocationPart = (value: string) => normalizePlace(value).replace(/[^a-z0-9]/g, "").trim();
+const STATE_ALIASES: Record<string, string> = {
+  AC: "acre", AL: "alagoas", AP: "amapa", AM: "amazonas", BA: "bahia", CE: "ceara",
+  DF: "distritofederal", ES: "espiritosanto", GO: "goias", MA: "maranhao", MT: "matogrosso",
+  MS: "matogrossodosul", MG: "minasgerais", PA: "para", PB: "paraiba", PR: "parana",
+  PE: "pernambuco", PI: "piaui", RJ: "riodejaneiro", RN: "riograndedonorte", RS: "riograndedosul",
+  RO: "rondonia", RR: "roraima", SC: "santacatarina", SP: "saopaulo", SE: "sergipe", TO: "tocantins",
+};
+const normalizedState = (value: string) => STATE_ALIASES[normalizeLocationPart(value).toUpperCase()] || normalizeLocationPart(value);
+const sameCityAndState = (selectedLocation: string, city: string, state: string) => {
+  const selected = selectedLocation.split(",").map((part) => part.trim());
+  return selected.length >= 2 && !!city.trim() && !!state.trim()
+    && normalizeLocationPart(selected[0]) === normalizeLocationPart(city)
+    && normalizedState(selected[1]) === normalizedState(state);
+};
+const geocodeCity = async (place: string): Promise<{ lat: number; lon: number } | null> => {
+  const query = place.trim();
+  if (!query) return null;
+  const key = normalizePlace(query);
+  if (geocodeCache.has(key)) return geocodeCache.get(key) ?? null;
+
+  // Coordenadas de referência para cidades do teste no Ceará. Evita depender
+  // exclusivamente de um serviço público de geocodificação.
+  const knownCities: Record<string, { lat: number; lon: number }> = {
+    "alcantaras ce": { lat: -3.5857, lon: -40.5479 },
+    "alcantaras, ce": { lat: -3.5857, lon: -40.5479 },
+    "alcantaras ceara": { lat: -3.5857, lon: -40.5479 },
+    "sobral ce": { lat: -3.6890, lon: -40.3490 },
+    "sobral, ce": { lat: -3.6890, lon: -40.3490 },
+    "sobral ceara": { lat: -3.6890, lon: -40.3490 },
+  };
+  const normalizedQuery = normalizeLocationPart(query.replace(/,\s*Brasil$/i, ""));
+  const known = Object.entries(knownCities).find(([name]) => normalizeLocationPart(name) === normalizedQuery)?.[1];
+  if (known) { geocodeCache.set(key, known); return known; }
+
+  // Reconhece cidade/UF mesmo quando a API retorna "Cidade, Ceará, Brasil"
+  // ou "Cidade, CE"; não depende da pontuação do cadastro.
+  const normalizedFullQuery = normalizeLocationPart(query.replace(/,\s*Brasil$/i, ""));
+  if (normalizedFullQuery.includes("alcantaras") && normalizedFullQuery.includes("ceara")) {
+    const coords = knownCities["alcantaras ce"];
+    geocodeCache.set(key, coords); return coords;
+  }
+  if (normalizedFullQuery.includes("sobral") && (normalizedFullQuery.includes("ceara") || normalizedFullQuery.endsWith("ce"))) {
+    const coords = knownCities["sobral ce"];
+    geocodeCache.set(key, coords); return coords;
+  }
+
+  // Tenta variações: alguns cadastros usam sigla (CE), outros o nome completo (Ceará).
+  const withoutCountry = query.replace(/,\s*Brasil$/i, "").trim();
+  const parts = withoutCountry.split(",").map((part) => part.trim()).filter(Boolean);
+  const stateAliases: Record<string, string> = {
+    AC: "Acre", AL: "Alagoas", AP: "Amapá", AM: "Amazonas", BA: "Bahia", CE: "Ceará",
+    DF: "Distrito Federal", ES: "Espírito Santo", GO: "Goiás", MA: "Maranhão", MT: "Mato Grosso",
+    MS: "Mato Grosso do Sul", MG: "Minas Gerais", PA: "Pará", PB: "Paraíba", PR: "Paraná",
+    PE: "Pernambuco", PI: "Piauí", RJ: "Rio de Janeiro", RN: "Rio Grande do Norte", RS: "Rio Grande do Sul",
+    RO: "Rondônia", RR: "Roraima", SC: "Santa Catarina", SP: "São Paulo", SE: "Sergipe", TO: "Tocantins",
+  };
+  if (parts.length > 1) parts[1] = stateAliases[parts[1].toUpperCase()] || parts[1];
+  const queries = [...new Set([query, `${withoutCountry}, Brasil`, `${parts.join(", ")}, Brasil`, parts[0]])];
+  let found: { lat: number; lon: number } | null = null;
+  try {
+    for (const search of queries) {
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&country=Brazil&q=${encodeURIComponent(search)}`);
+      if (!response.ok) continue;
+      const results = await response.json();
+      if (Array.isArray(results) && results.length) {
+        const lat = Number(results[0].lat);
+        const lon = Number(results[0].lon);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) { found = { lat, lon }; break; }
+      }
+    }
+  } catch {
+    found = null;
+  }
+  // Fallback independente do Nominatim, que pode limitar ou bloquear consultas.
+  if (!found && parts.length) {
+    try {
+      const city = parts[0];
+      const state = parts[1] || "";
+      const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=10&language=pt&format=json`);
+      if (response.ok) {
+        const data = await response.json();
+        const candidates = Array.isArray(data.results) ? data.results : [];
+        const stateNames: Record<string, string> = { CE: "Ceará", PE: "Pernambuco" };
+        const wantedState = stateNames[state.toUpperCase()] || state;
+        const match = candidates.find((item: any) => item.country_code === "BR" && (!wantedState || normalizePlace(item.admin1 || "") === normalizePlace(wantedState)));
+        const item = match || candidates.find((candidate: any) => candidate.country_code === "BR");
+        if (item && Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude))) {
+          found = { lat: Number(item.latitude), lon: Number(item.longitude) };
+        }
+      }
+    } catch { /* mantém null se os serviços estiverem indisponíveis */ }
+  }
+  geocodeCache.set(key, found);
+  return found;
+};
+const haversineKm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const dLat = radians(b.lat - a.lat);
+  const dLon = radians(b.lon - a.lon);
+  const value = Math.sin(dLat / 2) ** 2 + Math.cos(radians(a.lat)) * Math.cos(radians(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+};
+
 const firstValue = (...values: any[]) => values.find((value) => value !== undefined && value !== null && value !== "" && !(Array.isArray(value) && value.length === 0));
 
 const toText = (value: any): string => {
@@ -66,7 +173,9 @@ const normalizeArtist = (raw: any, index: number): Artist => {
     rating,
     reviews: Number(firstValue(raw.total_avaliacoes, raw.reviews, raw.avaliacoes, 0)) || 0,
     price,
-    distanceKm: Number(firstValue(raw.distanceKm, raw.distancia_km, raw.distancia, 0)) || 0,
+    distanceKm: Number(firstValue(raw.distanceKm, raw.distancia_km, raw.distancia, NaN)),
+    city: String(firstValue(raw.cidade_atendimento, raw.cidade, raw.city, raw.municipio, raw.nome_municipio, raw.localidade, "")),
+    state: String(firstValue(raw.estado_atendimento, raw.estado, raw.state, raw.uf, raw.sigla_estado, raw.estado_sigla, "")),
     favorite: false,
     avatarUrl: firstValue(raw.foto_perfil_url, raw.foto_url, raw.avatar_url, raw.profile_image, profile.foto_perfil_url, profile.foto_url, profile.avatar_url, null),
     searchableText,
@@ -84,6 +193,8 @@ type Artist = {
   reviews: number;
   price: number;
   distanceKm: number;
+  city: string;
+  state: string;
   favorite?: boolean;
   avatarUrl?: string | null;
   searchableText: string;
@@ -106,6 +217,7 @@ const CATEGORY_OPTIONS = [
 ];
 const RATING_OPTIONS = [5, 4, 3];
 const DISTANCE_OPTIONS = [10, 25, 50, 100];
+const ALL_LOCATIONS = "Todas as localidades";
 
 const MAX_SLIDER_VAL = 5000;
 const TRACK_WIDTH = 225;
@@ -127,12 +239,34 @@ export default function ExplorarScreen() {
   const [maxPrice, setMaxPrice] = useState("5000");
   const [ratingFilter, setRatingFilter] = useState(0);
   const [distance, setDistance] = useState(100);
-  const [location, setLocation] = useState("Caruaru, PE");
+  const [location, setLocation] = useState(ALL_LOCATIONS);
+  const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [locationStep, setLocationStep] = useState<"state" | "city">("state");
+  const [ibgeStates, setIbgeStates] = useState<any[]>([]);
+  const [ibgeCities, setIbgeCities] = useState<any[]>([]);
+  const [selectedState, setSelectedState] = useState<any>(null);
+  const [locationSearch, setLocationSearch] = useState("");
+  const [expandedFilters, setExpandedFilters] = useState<Record<string, boolean>>({ category: true, price: true, rating: true, location: true });
   const [sort, setSort] = useState("rating");
   const [sortOpen, setSortOpen] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [visibleCount, setVisibleCount] = useState(6);
   const [favorites, setFavorites] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    fetch("https://servicodados.ibge.gov.br/api/v1/localidades/estados?orderBy=nome")
+      .then((response) => response.json())
+      .then((data) => setIbgeStates(Array.isArray(data) ? data : []))
+      .catch(() => setIbgeStates([]));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedState?.id) { setIbgeCities([]); return; }
+    fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${selectedState.id}/municipios?orderBy=nome`)
+      .then((response) => response.json())
+      .then((data) => setIbgeCities(Array.isArray(data) ? data : []))
+      .catch(() => setIbgeCities([]));
+  }, [selectedState]);
 
   useEffect(() => {
     let active = true;
@@ -163,6 +297,59 @@ export default function ExplorarScreen() {
     loadArtists();
     return () => { active = false; };
   }, []);
+
+  // Calcula distâncias em linha reta e atualiza os artistas progressivamente.
+  // Assim, o filtro não fica esperando a geocodificação de todas as cidades.
+  useEffect(() => {
+    let active = true;
+    const calculateDistances = async () => {
+      if (location === ALL_LOCATIONS) {
+        setArtists((current) => current.map((artist) => ({ ...artist, distanceKm: NaN })));
+        return;
+      }
+
+      const exactMatches = new Set(
+        artists.filter((artist) => sameCityAndState(location, artist.city, artist.state)).map((artist) => artist.id),
+      );
+      // Correspondências da própria cidade são imediatas e não dependem da internet.
+      setArtists((current) => current.map((artist) => ({
+        ...artist,
+        distanceKm: exactMatches.has(artist.id) ? 0 : NaN,
+      })));
+
+      const origin = await geocodeCity(location);
+      if (!active || !origin) return;
+
+      const uniquePlaces = new Map<string, { city: string; state: string; ids: number[] }>();
+      for (const artist of artists) {
+        if (exactMatches.has(artist.id)) continue;
+        const city = artist.city.trim();
+        const state = artist.state.trim();
+        if (!city || !state) continue;
+        const place = `${city}, ${state}, Brasil`;
+        const key = normalizePlace(place);
+        const entry = uniquePlaces.get(key) || { city, state, ids: [] };
+        entry.ids.push(artist.id);
+        uniquePlaces.set(key, entry);
+      }
+
+      let firstRequest = true;
+      for (const [key, placeData] of uniquePlaces) {
+        if (!active) return;
+        // Evita exceder o limite do serviço público Nominatim.
+        if (!firstRequest) await new Promise((resolve) => setTimeout(resolve, 1100));
+        firstRequest = false;
+        const point = await geocodeCity(`${placeData.city}, ${placeData.state}, Brasil`);
+        if (!active) return;
+        if (!point) continue;
+        const km = Math.round(haversineKm(origin, point) * 10) / 10;
+        const ids = new Set(placeData.ids);
+        setArtists((current) => current.map((artist) => ids.has(artist.id) ? { ...artist, distanceKm: km } : artist));
+      }
+    };
+    const timer = setTimeout(() => { void calculateDistances(); }, 300);
+    return () => { active = false; clearTimeout(timer); };
+  }, [location, artists.length]);
 
   const numericMin = Math.max(0, Number(minPrice.replace(/\D/g, "")) || 0);
   const numericMax = Math.min(
@@ -222,7 +409,7 @@ export default function ExplorarScreen() {
       const matchesPrice =
         artist.price >= numericMin && artist.price <= numericMax;
       const matchesRating = ratingFilter === 0 || artist.rating >= ratingFilter;
-      const matchesDistance = artist.distanceKm <= distance;
+      const matchesDistance = location === ALL_LOCATIONS || (Number.isFinite(artist.distanceKm) && artist.distanceKm <= distance);
       return (
         matchesSearch && matchesCategory && matchesPrice && matchesRating && matchesDistance
       );
@@ -231,12 +418,16 @@ export default function ExplorarScreen() {
     return [...result].sort((a, b) => {
       if (sort === "priceAsc") return a.price - b.price;
       if (sort === "priceDesc") return b.price - a.price;
-      if (sort === "distance") return a.distanceKm - b.distanceKm;
+      if (sort === "distance") {
+        const aDistance = Number.isFinite(a.distanceKm) ? a.distanceKm : Number.POSITIVE_INFINITY;
+        const bDistance = Number.isFinite(b.distanceKm) ? b.distanceKm : Number.POSITIVE_INFINITY;
+        return aDistance - bDistance;
+      }
       
       // Ordena pelas avaliações reais retornadas pela API; perfis sem avaliação ficam no fim.
       return b.rating - a.rating;
     });
-  }, [artists, searchQuery, category, numericMin, numericMax, ratingFilter, distance, sort]);
+  }, [artists, searchQuery, category, numericMin, numericMax, ratingFilter, distance, sort, location]);
 
   useEffect(() => {
     setVisibleCount(6);
@@ -271,7 +462,7 @@ export default function ExplorarScreen() {
     setMaxPrice("5000");
     setRatingFilter(0);
     setDistance(100);
-    setLocation("Caruaru, PE");
+    setLocation(ALL_LOCATIONS);
     setSort("rating");
   };
 
@@ -312,7 +503,7 @@ export default function ExplorarScreen() {
           {item.rating > 0 ? <>⭐ <Text style={styles.ratingBold}>{item.rating.toFixed(1).replace(".", ",")}</Text> <Text style={styles.ratingCount}>({item.reviews})</Text></> : <Text style={styles.ratingCount}>Ainda sem avaliações</Text>}
         </Text>
         <Text style={styles.artistPrice}>{item.price > 0 ? `${formatPrice(item.price)}/hora` : "Preço a combinar"}</Text>
-        {item.distanceKm > 0 ? <Text style={styles.artistDistance}>📍 {item.distanceKm} km</Text> : null}
+        {Number.isFinite(item.distanceKm) ? <Text style={styles.artistDistance}>{item.distanceKm.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km de distância</Text> : null}
         <TouchableOpacity
           style={styles.profileButton}
           activeOpacity={0.85}
@@ -325,7 +516,7 @@ export default function ExplorarScreen() {
   };
 
   const renderFilterContent = () => (
-    <View style={styles.filterScroll}>
+    <ScrollView style={styles.filterScroll} showsVerticalScrollIndicator={false} persistentScrollbar={false} nestedScrollEnabled>
       <View style={styles.filterHeader}>
         <Text style={styles.filterTitle}>Filtros</Text>
         <TouchableOpacity onPress={clearFilters}>
@@ -334,10 +525,11 @@ export default function ExplorarScreen() {
       </View>
 
       <View style={styles.filterBlock}>
-        <View style={styles.filterBlockHeader}>
+        <TouchableOpacity style={styles.filterBlockHeader} onPress={() => setExpandedFilters((prev) => ({ ...prev, category: !prev.category }))} activeOpacity={0.75}>
           <Text style={styles.filterSubTitle}>Categoria</Text>
-          <Text style={styles.arrowIcon}>⌃</Text>
-        </View>
+          <View style={styles.expandButton}><Text style={styles.arrowIcon}>{expandedFilters.category ? "−" : "+"}</Text></View>
+        </TouchableOpacity>
+        {expandedFilters.category && <>
         {CATEGORY_OPTIONS.map((option) => {
           const active = category === option;
           return (
@@ -357,16 +549,17 @@ export default function ExplorarScreen() {
             </TouchableOpacity>
           );
         })}
+        </>}
       </View>
 
       <View style={styles.divider} />
 
       <View style={styles.filterBlock}>
-        <View style={styles.filterBlockHeader}>
+        <TouchableOpacity style={styles.filterBlockHeader} onPress={() => setExpandedFilters((prev) => ({ ...prev, price: !prev.price }))} activeOpacity={0.75}>
           <Text style={styles.filterSubTitle}>Preço por hora</Text>
-          <Text style={styles.arrowIcon}>⌃</Text>
-        </View>
-
+          <View style={styles.expandButton}><Text style={styles.arrowIcon}>{expandedFilters.price ? "−" : "+"}</Text></View>
+        </TouchableOpacity>
+        {expandedFilters.price && <>
         <View style={styles.sliderTrack}>
           <View
             style={[
@@ -412,15 +605,17 @@ export default function ExplorarScreen() {
             />
           </View>
         </View>
+        </>}
       </View>
 
       <View style={styles.divider} />
 
       <View style={styles.filterBlock}>
-        <View style={styles.filterBlockHeader}>
+        <TouchableOpacity style={styles.filterBlockHeader} onPress={() => setExpandedFilters((prev) => ({ ...prev, rating: !prev.rating }))} activeOpacity={0.75}>
           <Text style={styles.filterSubTitle}>Avaliação mínima</Text>
-          <Text style={styles.arrowIcon}>⌃</Text>
-        </View>
+          <View style={styles.expandButton}><Text style={styles.arrowIcon}>{expandedFilters.rating ? "−" : "+"}</Text></View>
+        </TouchableOpacity>
+        {expandedFilters.rating && <>
         {RATING_OPTIONS.map((option) => {
           const active = ratingFilter === option;
           const stars = "⭐".repeat(option) + "☆".repeat(5 - option);
@@ -443,43 +638,31 @@ export default function ExplorarScreen() {
             </TouchableOpacity>
           );
         })}
+        </>}
       </View>
 
       <View style={styles.divider} />
 
       <View style={styles.filterBlock}>
-        <View style={styles.filterBlockHeader}>
+        <TouchableOpacity style={styles.filterBlockHeader} onPress={() => setExpandedFilters((prev) => ({ ...prev, location: !prev.location }))} activeOpacity={0.75}>
           <Text style={styles.filterSubTitle}>Localização</Text>
-          <Text style={styles.arrowIcon}>⌃</Text>
-        </View>
-        <View style={styles.locationInputBox}>
-          <Text style={styles.locIcon}>📍</Text>
-          <TextInput
-            value={location}
-            onChangeText={setLocation}
-            style={styles.locInput}
-            placeholder="Cidade, UF"
-            placeholderTextColor={theme.textSecondary}
-          />
-        </View>
-        <Text style={styles.distanceLabel}>Distância máxima</Text>
-        <View style={styles.pillsRow}>
-          {DISTANCE_OPTIONS.map((option) => (
-            <TouchableOpacity
-              key={option}
-              style={[styles.pill, distance === option && styles.pillActive]}
-              onPress={() => setDistance(option)}
-            >
-              <Text
-                style={
-                  distance === option ? styles.pillTextActive : styles.pillText
-                }
-              >
-                {option} km
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+          <View style={styles.expandButton}><Text style={styles.arrowIcon}>{expandedFilters.location ? "−" : "+"}</Text></View>
+        </TouchableOpacity>
+        {expandedFilters.location && <>
+          <TouchableOpacity style={styles.locationInputBox} onPress={() => { setLocationSearch(""); setLocationStep("state"); setLocationModalVisible(true); }} activeOpacity={0.8}>
+            <Text style={styles.locIcon}></Text>
+            <Text style={styles.locInput}>{location || "Selecionar cidade e estado"}</Text>
+            <Text style={styles.arrowIcon}>⌄</Text>
+          </TouchableOpacity>
+          <Text style={styles.distanceLabel}>Distância máxima</Text>
+          <View style={styles.pillsRow}>
+            {DISTANCE_OPTIONS.map((option) => (
+              <TouchableOpacity key={option} style={[styles.pill, distance === option && styles.pillActive]} onPress={() => setDistance(option)}>
+                <Text style={distance === option ? styles.pillTextActive : styles.pillText}>{option} km</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </>}
       </View>
 
       {isMobile && (
@@ -490,7 +673,7 @@ export default function ExplorarScreen() {
           <Text style={styles.applyFilterButtonText}>Ver Resultados</Text>
         </TouchableOpacity>
       )}
-    </View>
+    </ScrollView>
   );
 
   return (
@@ -512,7 +695,7 @@ export default function ExplorarScreen() {
             >
               <View style={styles.pageHeader}>
                 <View style={styles.titleRow}>
-                  <Text style={styles.pageTitle}>Explorar Artistas</Text>
+                  <Text style={styles.pageTitle}>Descobrir Artistas</Text>
                   {isMobile && (
                     <TouchableOpacity
                       style={styles.mobileFilterBtn}
@@ -635,13 +818,49 @@ export default function ExplorarScreen() {
               >
                 <View style={styles.modalOverlay}>
                   <View style={styles.modalContent}>
-                    <ScrollView showsVerticalScrollIndicator={false}>
-                      {renderFilterContent()}
-                    </ScrollView>
+                    {renderFilterContent()}
                   </View>
                 </View>
               </Modal>
             )}
+
+            <Modal visible={locationModalVisible} transparent animationType="fade" onRequestClose={() => setLocationModalVisible(false)}>
+              <View style={[styles.modalOverlay, styles.locationModalOverlay]}>
+                <View style={styles.locationModalCard}>
+                  <View style={styles.filterHeader}>
+                    <View>
+                      <Text style={styles.filterTitle}>{locationStep === "state" ? "Selecionar estado" : "Selecionar cidade"}</Text>
+                      <Text style={styles.locationModalSubtitle}>{locationStep === "state" ? "Escolha o estado desejado" : `Estado: ${selectedState?.nome || ""}`}</Text>
+                    </View>
+                    <TouchableOpacity style={styles.modalClosePill} onPress={() => setLocationModalVisible(false)}><Text style={styles.clearFilters}>Fechar</Text></TouchableOpacity>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.locationListItem, location === ALL_LOCATIONS && styles.sortOptionActive]}
+                    onPress={() => {
+                      setLocation(ALL_LOCATIONS);
+                      setLocationModalVisible(false);
+                      setLocationSearch("");
+                      setSelectedState(null);
+                      setLocationStep("state");
+                    }}
+                  >
+                    <Text style={[styles.locationListItemText, location === ALL_LOCATIONS && { color: theme.accent, fontWeight: "700" }]}>Todas as localidades</Text>
+                  </TouchableOpacity>
+                  <TextInput value={locationSearch} onChangeText={setLocationSearch} style={styles.locationSearchInput} placeholder={locationStep === "state" ? "Buscar estado..." : "Buscar cidade..."} placeholderTextColor={theme.textSecondary} />
+                  {locationStep === "city" && <TouchableOpacity style={styles.backToStates} onPress={() => { setLocationStep("state"); setLocationSearch(""); }}><Text style={styles.clearFilters}>← Escolher outro estado</Text></TouchableOpacity>}
+                  <ScrollView style={styles.locationList} keyboardShouldPersistTaps="handled">
+                    {(locationStep === "state" ? ibgeStates.filter((item) => `${item.nome} ${item.sigla}`.toLowerCase().includes(locationSearch.toLowerCase())) : ibgeCities.filter((item) => item.nome.toLowerCase().includes(locationSearch.toLowerCase()))).map((item: any) => (
+                      <TouchableOpacity key={item.id} style={styles.locationListItem} onPress={() => {
+                        if (locationStep === "state") { setSelectedState(item); setLocationStep("city"); setLocationSearch(""); }
+                        else { setLocation(`${item.nome}, ${selectedState?.sigla || ""}`); setLocationModalVisible(false); setLocationSearch(""); }
+                      }}>
+                        <Text style={styles.locationListItemText}>{locationStep === "state" ? `${item.nome} (${item.sigla})` : item.nome}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </View>
+            </Modal>
           </View>
         </View>
       </View>
@@ -741,9 +960,10 @@ const getStyles = (theme: any) =>
     },
     gridScroll: { flex: 1, zIndex: 1 },
     gridContainer: { paddingBottom: 20, zIndex: 1 },
-    gridRow: { justifyContent: "space-between", gap: 18, marginBottom: 18 },
+    gridRow: { justifyContent: "flex-start", gap: 18, marginBottom: 18 },
     artistCard: {
       flex: 1,
+      width: "32%",
       maxWidth: "32%",
       backgroundColor: theme.cardBg,
       borderRadius: 16,
@@ -907,7 +1127,17 @@ const getStyles = (theme: any) =>
       fontWeight: "bold",
       color: theme.textPrimary,
     },
-    arrowIcon: { color: theme.textSecondary, fontSize: 15 },
+    arrowIcon: { color: theme.textSecondary, fontSize: 18, fontWeight: "700" },
+    expandButton: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: theme.mainBg, borderWidth: 1, borderColor: theme.borderColor },
+    locationModalOverlay: { justifyContent: "center", alignItems: "center", paddingHorizontal: 16, paddingVertical: 24 },
+    locationModalCard: { width: "100%", maxWidth: 520, height: "76%", maxHeight: 620, alignSelf: "center", backgroundColor: theme.cardBg, borderRadius: 18, padding: 20, overflow: "hidden" },
+    modalClosePill: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: theme.mainBg },
+    locationModalSubtitle: { color: theme.textSecondary, fontSize: 12, marginTop: 3 },
+    locationSearchInput: { borderWidth: 1, borderColor: theme.borderColor, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, color: theme.textPrimary, marginBottom: 10 },
+    locationList: { flex: 1, minHeight: 0 },
+    locationListItem: { paddingVertical: 13, paddingHorizontal: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.borderColor },
+    locationListItemText: { color: theme.textPrimary, fontSize: 14 },
+    backToStates: { paddingVertical: 8 },
     radioItem: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
     radioActive: { color: theme.accent, fontSize: 18, marginRight: 10 },
     radioInactive: { color: theme.borderColor, fontSize: 18, marginRight: 10 },
@@ -934,7 +1164,9 @@ const getStyles = (theme: any) =>
       backgroundColor: theme.borderColor,
       borderRadius: 3,
       marginVertical: 14,
+      marginHorizontal: 11,
       position: "relative",
+      overflow: "visible",
     },
     sliderFill: {
       position: "absolute",

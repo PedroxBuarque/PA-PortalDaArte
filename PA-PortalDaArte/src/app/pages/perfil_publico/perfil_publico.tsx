@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -12,7 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { ArrowLeft, MapPin, MessageCircle, Music, Star } from "lucide-react-native";
+import { ArrowLeft, MapPin, MessageCircle, Music, Star, X } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Header from "../../../components/Header";
@@ -43,6 +44,8 @@ export default function PerfilPublicoScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [portfolio, setPortfolio] = useState<any[]>([]);
+  const [selectedService, setSelectedService] = useState<any | null>(null);
+  const [isServiceModalVisible, setIsServiceModalVisible] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -211,17 +214,57 @@ export default function PerfilPublicoScreen() {
                     const price = firstValue(service?.preco_min, service?.preco, service?.price, null);
                     const maxPrice = firstValue(service?.preco_max, null);
                     return (
-                      <View key={`${title}-${index}`} style={styles.serviceItem}>
+                      <TouchableOpacity
+                        key={`${title}-${index}`}
+                        style={styles.serviceItem}
+                        activeOpacity={0.78}
+                        onPress={() => { setSelectedService(service); setIsServiceModalVisible(true); }}
+                      >
                         <View style={styles.serviceIcon}><Music size={17} color={theme.accent} /></View>
                         <View style={styles.serviceTextWrap}>
-                          <Text style={styles.serviceTitle}>{title}</Text>
-                          {description ? <Text style={styles.serviceDescription}>{description}</Text> : null}
+                          <Text style={styles.serviceTitle} numberOfLines={2}>{title}</Text>
                           {price !== null ? <Text style={styles.servicePrice}>A partir de R$ {Number(price).toLocaleString("pt-BR")}{maxPrice !== null ? ` até R$ ${Number(maxPrice).toLocaleString("pt-BR")}` : ""}</Text> : null}
+                          {description ? <Text style={styles.serviceDescription} numberOfLines={2}>{description}</Text> : null}
                         </View>
-                      </View>
+                      </TouchableOpacity>
                     );
                   }) : <Text style={styles.bodyText}>Nenhum serviço cadastrado.</Text>}
                 </View>
+
+                <Modal visible={isServiceModalVisible} transparent animationType="fade" onRequestClose={() => setIsServiceModalVisible(false)}>
+                  <View style={styles.modalOverlay}>
+                    <View style={styles.serviceModal}>
+                      <View style={styles.modalHeader}>
+                        <View style={{ flex: 1, minWidth: 0, paddingRight: 12 }}>
+                          <Text style={styles.modalTitle} numberOfLines={2}>{asText(firstValue(selectedService?.titulo, selectedService?.title, selectedService?.nome, "Detalhes do serviço"))}</Text>
+                          <Text style={styles.modalSubtitle}>Informações do serviço</Text>
+                        </View>
+                        <TouchableOpacity style={styles.modalCloseButton} onPress={() => setIsServiceModalVisible(false)} accessibilityLabel="Fechar detalhes">
+                          <X size={19} color={theme.textSecondary} />
+                        </TouchableOpacity>
+                      </View>
+                      <ScrollView style={styles.modalScroll} contentContainerStyle={{ paddingBottom: 16 }} showsVerticalScrollIndicator>
+                        {(selectedService?.preco_min != null || selectedService?.preco_max != null || selectedService?.preco != null || selectedService?.price != null) ? (
+                          <View style={styles.modalInfoBox}>
+                            <Text style={styles.modalInfoLabel}>Valor do serviço</Text>
+                            <Text style={styles.modalPrice}>{selectedService?.preco_min != null && selectedService?.preco_max != null && Number(selectedService.preco_min) !== Number(selectedService.preco_max)
+                              ? `${Number(selectedService.preco_min).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} – ${Number(selectedService.preco_max).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`
+                              : Number(firstValue(selectedService?.preco_min, selectedService?.preco_max, selectedService?.preco, selectedService?.price)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Text>
+                          </View>
+                        ) : null}
+                        <View style={styles.modalInfoBox}>
+                          <Text style={styles.modalInfoTitle}>Descrição</Text>
+                          <Text style={styles.modalDescription}>{asText(firstValue(selectedService?.descricao, selectedService?.description, "Nenhuma descrição informada."))}</Text>
+                        </View>
+                      </ScrollView>
+                      <View style={styles.modalFooter}>
+                        <TouchableOpacity onPress={() => setIsServiceModalVisible(false)} style={styles.modalCloseAction}>
+                          <Text style={styles.modalCloseActionText}>Fechar</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                </Modal>
 
                 <View style={styles.sectionCard}>
                   <Text style={styles.sectionTitle}>Portfólio</Text>
@@ -285,6 +328,21 @@ const getStyles = (theme: any) => StyleSheet.create({
   serviceTitle: { color: theme.textPrimary, fontSize: 14, fontWeight: "700" },
   serviceDescription: { color: theme.textSecondary, fontSize: 12, lineHeight: 18 },
   servicePrice: { color: theme.accent, fontSize: 12, fontWeight: "700" },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center", padding: 18 },
+  serviceModal: { width: "100%", maxWidth: 560, maxHeight: "82%", backgroundColor: theme.cardBg, borderColor: theme.borderColor, borderWidth: 1, borderRadius: 16, overflow: "hidden" },
+  modalHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingVertical: 17, borderBottomWidth: 1, borderBottomColor: theme.borderColor },
+  modalTitle: { color: theme.textPrimary, fontSize: 18, fontWeight: "800" },
+  modalSubtitle: { color: theme.textSecondary, fontSize: 12, marginTop: 4 },
+  modalCloseButton: { padding: 7, borderRadius: 8 },
+  modalScroll: { paddingHorizontal: 18, paddingTop: 16 },
+  modalInfoBox: { padding: 14, borderRadius: 10, backgroundColor: theme.mainBg, borderWidth: 1, borderColor: theme.borderColor, marginBottom: 14 },
+  modalInfoLabel: { color: theme.textSecondary, fontSize: 11, marginBottom: 5 },
+  modalPrice: { color: theme.accent, fontSize: 18, fontWeight: "800" },
+  modalInfoTitle: { color: theme.textPrimary, fontSize: 13, fontWeight: "700", marginBottom: 8 },
+  modalDescription: { color: theme.textSecondary, fontSize: 13, lineHeight: 21 },
+  modalFooter: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 18, paddingVertical: 14, borderTopWidth: 1, borderTopColor: theme.borderColor },
+  modalCloseAction: { paddingHorizontal: 16, paddingVertical: 11, borderRadius: 8, borderWidth: 1, borderColor: theme.borderColor },
+  modalCloseActionText: { color: theme.textPrimary, fontWeight: "600", fontSize: 12 },
   stateBox: { alignItems: "center", justifyContent: "center", minHeight: 280, gap: 12 },
   stateText: { color: theme.textSecondary, fontSize: 14, textAlign: "center" },
   errorTitle: { color: theme.textPrimary, fontSize: 18, fontWeight: "800" },

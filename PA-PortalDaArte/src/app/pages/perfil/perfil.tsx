@@ -29,6 +29,7 @@ import {
   Link as LinkIcon,
   Mic,
   Music,
+  Pencil,
   Plus,
   Star,
   Trash2,
@@ -127,6 +128,8 @@ export default function IndexScreen() {
 
   const [profileName, setProfileName] = useState("Usuário");
   const [editedProfileName, setEditedProfileName] = useState("");
+  const [artistDisplayName, setArtistDisplayName] = useState("");
+  const [editedArtistDisplayName, setEditedArtistDisplayName] = useState("");
 
   const [location, setLocation] = useState("Caruaru, PE");
   const [editedLocation, setEditedLocation] = useState("Caruaru, PE");
@@ -146,6 +149,17 @@ export default function IndexScreen() {
   const [artistPriceMax, setArtistPriceMax] = useState<number | null>(null);
   const [editedArtistPriceMin, setEditedArtistPriceMin] = useState("");
   const [editedArtistPriceMax, setEditedArtistPriceMax] = useState("");
+  const [artistCategories, setArtistCategories] = useState<string[]>([]);
+  const [editedArtistCategories, setEditedArtistCategories] = useState<string[]>([]);
+  const [newArtistCategory, setNewArtistCategory] = useState("");
+  const [artistServices, setArtistServices] = useState<any[]>([]);
+  const [selectedService, setSelectedService] = useState<any | null>(null);
+  const [isServiceModalVisible, setIsServiceModalVisible] = useState(false);
+  const [editedArtistServices, setEditedArtistServices] = useState<any[]>([]);
+  const [newServiceTitle, setNewServiceTitle] = useState("");
+  const [newServiceDescription, setNewServiceDescription] = useState("");
+  const [newServicePriceMin, setNewServicePriceMin] = useState("");
+  const [newServicePriceMax, setNewServicePriceMax] = useState("");
 
   const [customLinks, setCustomLinks] = useState<CustomLink[]>([]);
   const [editedCustomLinks, setEditedCustomLinks] = useState<CustomLink[]>([]);
@@ -197,7 +211,7 @@ export default function IndexScreen() {
           setIsArtista(!!dados.is_artista);
 
           if (dados.is_artista) {
-            setProfileCategory(dados.nome_artistico ? `${dados.nome_artistico}` : FIXED_CATEGORIES[0]);
+            setProfileCategory(dados.categoria_atuacao || FIXED_CATEGORIES[0]);
             setBio(dados.biografia || "Conte um pouco sobre sua trajetória artística...");
           setArtistPriceMin(dados.preco_min !== null && dados.preco_min !== undefined ? Number(dados.preco_min) : null);
           setArtistPriceMax(dados.preco_max !== null && dados.preco_max !== undefined ? Number(dados.preco_max) : null);
@@ -290,6 +304,34 @@ export default function IndexScreen() {
     return () => { active = false; };
   }, [isArtista]);
 
+  useEffect(() => {
+    if (!isArtista) return;
+    let active = true;
+    (async () => {
+      try {
+        const token = await AsyncStorage.getItem("access_token");
+        if (!token) return;
+        const response = await fetch(`${URL_API}/api/artistas/me/detalhes`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const payload = await response.json();
+        if (!response.ok || !active) return;
+        const categorias = Array.isArray(payload.categorias) ? payload.categorias : [];
+        const servicos = Array.isArray(payload.servicos) ? payload.servicos : [];
+        setArtistModeInput(["presencial", "remoto", "ambos"].includes(payload.modalidade_atendimento) ? payload.modalidade_atendimento : "ambos");
+        setArtistDisplayName(payload.nome_artistico || "");
+        setEditedArtistDisplayName(payload.nome_artistico || "");
+        setArtistCategories(categorias);
+        setEditedArtistCategories(categorias);
+        setArtistServices(servicos);
+        setEditedArtistServices(servicos.map((item: any) => ({ ...item })));
+      } catch (error) {
+        console.warn("Não foi possível carregar serviços e categorias do artista", error);
+      }
+    })();
+    return () => { active = false; };
+  }, [isArtista]);
+
   const handleConfirmBecomeArtist = async () => {
     if (!artistNameInput.trim()) {
       Alert.alert("Atenção", "Por favor, digite o nome do artista ou da banda.");
@@ -326,6 +368,7 @@ export default function IndexScreen() {
         },
         body: JSON.stringify({
           nome_artistico: nomeArtistaLimpo,
+          categoria_atuacao: selectedArtistCategory,
           biografia: artistBioInput.trim() || null,
           anos_experiencia: Math.max(0, Number.parseInt(artistYearsInput || "0", 10) || 0),
           modalidade_atendimento: artistModeInput,
@@ -361,11 +404,17 @@ export default function IndexScreen() {
   const handleStartEditingProfile = () => {
     setEditedProfileImage(profileImage);
     setEditedProfileName(profileName);
+    setEditedArtistDisplayName(artistDisplayName);
     setEditedLocation(location);
     setEditedProfileCategory(isArtista ? profileCategory : FIXED_CATEGORIES[0]);
     setEditedBio(bio);
     setEditedArtistPriceMin(artistPriceMin !== null ? String(artistPriceMin).replace(".", ",") : "");
     setEditedArtistPriceMax(artistPriceMax !== null ? String(artistPriceMax).replace(".", ",") : "");
+    setEditedArtistCategories([...artistCategories]);
+    setEditedArtistServices(artistServices.map((item: any) => ({ ...item })));
+    setNewArtistCategory("");
+    setNewServiceTitle("");
+    setNewServiceDescription("");
     setEditedCustomLinks(JSON.parse(JSON.stringify(customLinks)));
     setIsEditingProfile(true);
   };
@@ -373,6 +422,8 @@ export default function IndexScreen() {
   const handleCancelEditingProfile = () => {
     setEditedArtistPriceMin(artistPriceMin !== null ? String(artistPriceMin).replace(".", ",") : "");
     setEditedArtistPriceMax(artistPriceMax !== null ? String(artistPriceMax).replace(".", ",") : "");
+    setEditedArtistCategories([...artistCategories]);
+    setEditedArtistServices(artistServices.map((item: any) => ({ ...item })));
     setIsEditingProfile(false);
   };
 
@@ -404,6 +455,14 @@ export default function IndexScreen() {
       return;
     }
 
+    // Inclui também a categoria que ainda estiver digitada no campo, mesmo que
+    // o artista não tenha pressionado o botão + antes de salvar o perfil.
+    const categoriaDigitada = newArtistCategory.trim();
+    const categoriasParaSalvar = [...editedArtistCategories];
+    if (categoriaDigitada && !categoriasParaSalvar.some((item) => item.toLowerCase() === categoriaDigitada.toLowerCase())) {
+      categoriasParaSalvar.push(categoriaDigitada.slice(0, 100));
+    }
+
     try {
       const token = await AsyncStorage.getItem("access_token");
       if (!token) {
@@ -426,6 +485,7 @@ export default function IndexScreen() {
           cidade: cidadeNome,
           estado: estadoSigla,
           biografia: editedBio.trim(),
+          categoria_atuacao: isArtista ? editedProfileCategory.trim() : null,
           foto_perfil: editedProfileImage,
           // O documento obrigatório já foi informado no cadastro; a API o preserva.
         }),
@@ -462,7 +522,40 @@ export default function IndexScreen() {
         setArtistPriceMax(precoMaxEditado);
       }
 
+      if (isArtista) {
+        const detalhesResponse = await fetch(`${URL_API}/api/artistas/me/detalhes`, {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            modalidade_atendimento: artistModeInput,
+            nome_artistico: editedArtistDisplayName.trim(),
+            categorias: categoriasParaSalvar,
+            servicos: editedArtistServices.map((item: any) => ({
+              id: item.id ?? null,
+              titulo: String(item.titulo || "").trim(),
+              descricao: String(item.descricao || "").trim(),
+              preco_min: item.preco_min === "" || item.preco_min == null ? null : Number(String(item.preco_min).replace(",", ".")),
+              preco_max: item.preco_max === "" || item.preco_max == null ? null : Number(String(item.preco_max).replace(",", ".")),
+              modalidade: item.modalidade || "ambos",
+            })).filter((item: any) => item.titulo),
+          }),
+        });
+        const detalhesResult = await detalhesResponse.json().catch(() => ({}));
+        if (!detalhesResponse.ok) {
+          Alert.alert("Perfil parcialmente salvo", detalhesResult.detail || "Os dados básicos foram salvos, mas não foi possível atualizar serviços e categorias.");
+          return;
+        }
+        setArtistCategories(Array.isArray(detalhesResult.categorias) ? detalhesResult.categorias : categoriasParaSalvar);
+        setEditedArtistCategories(Array.isArray(detalhesResult.categorias) ? detalhesResult.categorias : categoriasParaSalvar);
+        setNewArtistCategory("");
+        setArtistServices(Array.isArray(detalhesResult.servicos) ? detalhesResult.servicos : editedArtistServices);
+        setEditedArtistServices(Array.isArray(detalhesResult.servicos) ? detalhesResult.servicos : editedArtistServices);
+      }
+
       setProfileName(editedProfileName.trim());
+      if (isArtista) {
+        setArtistDisplayName(editedArtistDisplayName.trim());
+      }
       setLocation(editedLocation.trim());
       if (isArtista) {
         setProfileCategory(editedProfileCategory.trim());
@@ -845,6 +938,21 @@ export default function IndexScreen() {
                               />
                             </View>
 
+                            {isArtista && (
+                              <View style={styles.editInputBox}>
+                                <Text style={styles.editFieldLabel}>Nome artístico</Text>
+                                <TextInput
+                                  value={editedArtistDisplayName}
+                                  onChangeText={setEditedArtistDisplayName}
+                                  style={styles.profileNameInputStyled}
+                                  placeholder="Como deseja aparecer no perfil público"
+                                  placeholderTextColor={theme.textSecondary}
+                                  maxLength={80}
+                                />
+                                <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }}>Até 80 caracteres</Text>
+                              </View>
+                            )}
+
                             <TouchableOpacity
                               style={styles.editInputBox}
                               onPress={() => {
@@ -941,6 +1049,50 @@ export default function IndexScreen() {
                     {!isEditingProfile ? (
                       <>
                         <Text style={styles.bioText}>{bio}</Text>
+                        {isArtista && artistCategories.length > 0 && (
+                          <View style={{ marginTop: 24, paddingTop: 18, borderTopWidth: 1, borderTopColor: theme.borderColor }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+                              <View>
+                                <Text style={[styles.sectionTitle, { fontSize: 15 }]}>Categorias e estilos</Text>
+                                <Text style={{ color: theme.textSecondary, fontSize: 11, marginTop: 2 }}>O que define o seu trabalho</Text>
+                              </View>
+                            </View>
+                            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 9 }}>
+                              {artistCategories.map((category, index) => (
+                                <View key={`${category}-${index}`} style={{ borderWidth: 1, borderColor: theme.borderColor, backgroundColor: theme.mainBg, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 }}>
+                                  <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: "600" }}>{category}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          </View>
+                        )}
+                        {isArtista && artistServices.length > 0 && (
+                          <View style={{ marginTop: 24, paddingTop: 18, borderTopWidth: 1, borderTopColor: theme.borderColor }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+                              <View>
+                                <Text style={[styles.sectionTitle, { fontSize: 15 }]}>Serviços</Text>
+                                <Text style={{ color: theme.textSecondary, fontSize: 11, marginTop: 2 }}>Conheça o que você oferece</Text>
+                              </View>
+                            </View>
+                            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+                              {artistServices.map((service: any, index: number) => (
+                                <TouchableOpacity key={String(service.id || index)} activeOpacity={0.78} onPress={() => { setSelectedService(service); setIsServiceModalVisible(true); }} style={{ flexGrow: 1, flexBasis: 260, maxWidth: 520, minWidth: 0, padding: 15, borderRadius: 10, borderWidth: 1, borderColor: theme.borderColor, backgroundColor: theme.mainBg }}>
+                                  <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
+                                    <View style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, alignItems: "center", justifyContent: "center", marginRight: 10 }}>
+                                      <Text style={{ color: theme.accent, fontSize: 15, fontWeight: "800" }}>✦</Text>
+                                    </View>
+                                    <View style={{ flex: 1, minWidth: 0 }}>
+                                      <Text numberOfLines={2} ellipsizeMode="tail" style={{ color: theme.textPrimary, fontWeight: "700", fontSize: 13, lineHeight: 19 }}>{service.titulo}</Text>
+                                      {!!service.descricao && <Text numberOfLines={3} ellipsizeMode="tail" style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 5 }}>{service.descricao}</Text>}
+                                      {(service.preco_min != null || service.preco_max != null) && <Text style={{ color: theme.accent, fontSize: 13, fontWeight: "800", marginTop: 9 }}>{service.preco_min != null && service.preco_max != null && Number(service.preco_min) !== Number(service.preco_max) ? `${Number(service.preco_min).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} – ${Number(service.preco_max).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : Number(service.preco_min ?? service.preco_max).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Text>}
+                                      <Text style={{ color: theme.accent, fontSize: 11, fontWeight: "700", marginTop: 10 }}>Ver detalhes →</Text>
+                                    </View>
+                                  </View>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          </View>
+                        )}
 
                         {customLinks.length > 0 && (
                           <View style={styles.socialRow}>
@@ -983,6 +1135,64 @@ export default function IndexScreen() {
                             </Text>
                           </View>
                         </View>
+
+                        {isArtista && (
+                          <View style={[styles.editInputBox, { marginTop: 14 }]}>
+                            <Text style={styles.editFieldLabel}>Modalidade de atendimento</Text>
+                            <Text style={{ color: theme.textSecondary, fontSize: 11, marginBottom: 9 }}>Informe se você atende presencialmente, remotamente ou das duas formas.</Text>
+                            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                              {[{ label: "Presencial", value: "presencial" }, { label: "Remoto", value: "remoto" }, { label: "Ambos", value: "ambos" }].map((option) => (
+                                <TouchableOpacity key={option.value} onPress={() => setArtistModeInput(option.value)} style={{ borderWidth: 1, borderColor: artistModeInput === option.value ? theme.accent : theme.borderColor, backgroundColor: artistModeInput === option.value ? theme.accent + "22" : "transparent", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10 }}>
+                                  <Text style={{ color: theme.textPrimary, fontWeight: artistModeInput === option.value ? "700" : "500" }}>{option.label}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          </View>
+                        )}
+
+                        {isArtista && (
+                          <View style={[styles.editInputBox, { marginTop: 14 }]}>
+                            <Text style={styles.editFieldLabel}>Categorias e estilos</Text>
+                            <Text style={{ color: theme.textSecondary, fontSize: 11, marginBottom: 8 }}>Adicione gêneros, estilos musicais ou categorias que descrevam sua atuação.</Text>
+                            <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+                              <TextInput value={newArtistCategory} onChangeText={setNewArtistCategory} placeholder="Ex.: MPB, Forró, Rock" placeholderTextColor={theme.textSecondary} style={[styles.formInput, { flex: 1 }]} onSubmitEditing={() => { const value = newArtistCategory.trim(); if (value && !editedArtistCategories.some((item) => item.toLowerCase() === value.toLowerCase())) setEditedArtistCategories((current) => [...current, value]); setNewArtistCategory(""); }} />
+                              <TouchableOpacity onPress={() => { const value = newArtistCategory.trim(); if (value && !editedArtistCategories.some((item) => item.toLowerCase() === value.toLowerCase())) setEditedArtistCategories((current) => [...current, value]); setNewArtistCategory(""); }} style={{ backgroundColor: theme.accent, borderRadius: 9, padding: 12 }}><Plus size={16} color="#FFFFFF" /></TouchableOpacity>
+                            </View>
+                            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 9 }}>
+                              {editedArtistCategories.map((category, index) => (
+                                <View key={`${category}-${index}`} style={{ flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1, borderColor: theme.accent, backgroundColor: theme.mainBg, borderRadius: 16, paddingLeft: 10, paddingRight: 6, paddingVertical: 5 }}>
+                                  <Text style={{ color: theme.textPrimary, fontSize: 12 }}>{category}</Text>
+                                  <TouchableOpacity onPress={() => setEditedArtistCategories((current) => current.filter((_, i) => i !== index))}><X size={13} color={theme.textSecondary} /></TouchableOpacity>
+                                </View>
+                              ))}
+                            </View>
+                            <View style={{ height: 1, backgroundColor: theme.borderColor, marginVertical: 16 }} />
+                            <Text style={styles.editFieldLabel}>Serviços</Text>
+                            <Text style={{ color: theme.textSecondary, fontSize: 11, marginBottom: 8 }}>Informe os serviços que serão exibidos no seu perfil público.</Text>
+                            {editedArtistServices.map((service: any, index: number) => (
+                              <View key={String(service.id || `novo-${index}`)} style={{ borderWidth: 1, borderColor: theme.borderColor, borderRadius: 10, padding: 10, marginBottom: 9 }}>
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                  <TextInput value={service.titulo || ""} onChangeText={(value) => setEditedArtistServices((current) => current.map((item, i) => i === index ? { ...item, titulo: value } : item))} placeholder="Nome do serviço" placeholderTextColor={theme.textSecondary} maxLength={60} style={[styles.formInput, { flex: 1, minWidth: 0, marginBottom: 8 }]} />
+                                  <TouchableOpacity onPress={() => setEditedArtistServices((current) => current.filter((_, i) => i !== index))} style={{ padding: 7, marginBottom: 8 }}><Trash2 size={16} color="#E05A10" /></TouchableOpacity>
+                                </View>
+                                <TextInput value={service.descricao || ""} onChangeText={(value) => setEditedArtistServices((current) => current.map((item, i) => i === index ? { ...item, descricao: value } : item))} placeholder="Descrição (opcional)" placeholderTextColor={theme.textSecondary} multiline maxLength={500} style={[styles.formInput, { minHeight: 64, textAlignVertical: "top" }]} />
+                                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                                  <View style={{ flex: 1 }}><Text style={{ color: theme.textSecondary, fontSize: 11, marginBottom: 5 }}>Valor mínimo (R$)</Text><TextInput value={service.preco_min == null ? "" : String(service.preco_min)} onChangeText={(value) => setEditedArtistServices((current) => current.map((item, i) => i === index ? { ...item, preco_min: value } : item))} placeholder="Ex.: 150" keyboardType="decimal-pad" placeholderTextColor={theme.textSecondary} style={styles.formInput} /></View>
+                                  <View style={{ flex: 1 }}><Text style={{ color: theme.textSecondary, fontSize: 11, marginBottom: 5 }}>Valor máximo (R$)</Text><TextInput value={service.preco_max == null ? "" : String(service.preco_max)} onChangeText={(value) => setEditedArtistServices((current) => current.map((item, i) => i === index ? { ...item, preco_max: value } : item))} placeholder="Ex.: 500" keyboardType="decimal-pad" placeholderTextColor={theme.textSecondary} style={styles.formInput} /></View>
+                                </View>
+                              </View>
+                            ))}
+                            <TextInput value={newServiceTitle} onChangeText={setNewServiceTitle} placeholder="Novo serviço (ex.: Show ao vivo)" placeholderTextColor={theme.textSecondary} maxLength={60} style={[styles.formInput, { marginBottom: 4 }]} />
+                            <Text style={{ color: theme.textSecondary, fontSize: 10, textAlign: "right", marginBottom: 8 }}>{newServiceTitle.length}/60 caracteres</Text>
+                            <TextInput value={newServiceDescription} onChangeText={setNewServiceDescription} placeholder="Descrição do serviço (opcional)" placeholderTextColor={theme.textSecondary} multiline maxLength={500} style={[styles.formInput, { minHeight: 64, textAlignVertical: "top", marginBottom: 4 }]} />
+                            <Text style={{ color: theme.textSecondary, fontSize: 10, textAlign: "right", marginBottom: 8 }}>{newServiceDescription.length}/500 caracteres</Text>
+                            <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+                              <View style={{ flex: 1 }}><Text style={{ color: theme.textSecondary, fontSize: 11, marginBottom: 5 }}>Valor mínimo (R$)</Text><TextInput value={newServicePriceMin} onChangeText={setNewServicePriceMin} placeholder="Ex.: 150" keyboardType="decimal-pad" placeholderTextColor={theme.textSecondary} style={styles.formInput} /></View>
+                              <View style={{ flex: 1 }}><Text style={{ color: theme.textSecondary, fontSize: 11, marginBottom: 5 }}>Valor máximo (R$)</Text><TextInput value={newServicePriceMax} onChangeText={setNewServicePriceMax} placeholder="Ex.: 500" keyboardType="decimal-pad" placeholderTextColor={theme.textSecondary} style={styles.formInput} /></View>
+                            </View>
+                            <TouchableOpacity onPress={() => { const title = newServiceTitle.trim(); if (!title) { Alert.alert("Serviço", "Informe o nome do serviço."); return; } const min = newServicePriceMin.trim() ? Number(newServicePriceMin.replace(",", ".")) : null; const max = newServicePriceMax.trim() ? Number(newServicePriceMax.replace(",", ".")) : null; if ((min != null && (!Number.isFinite(min) || min < 0)) || (max != null && (!Number.isFinite(max) || max < 0)) || (min != null && max != null && max < min)) { Alert.alert("Valores inválidos", "Confira os valores mínimo e máximo do serviço."); return; } setEditedArtistServices((current) => [...current, { titulo: title, descricao: newServiceDescription.trim(), preco_min: min, preco_max: max, modalidade: "ambos" }]); setNewServiceTitle(""); setNewServiceDescription(""); setNewServicePriceMin(""); setNewServicePriceMax(""); }} style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: theme.accent, borderRadius: 9, padding: 10 }}><Plus size={15} color={theme.accent} /><Text style={{ color: theme.accent, fontWeight: "700", fontSize: 12 }}>Adicionar serviço</Text></TouchableOpacity>
+                          </View>
+                        )}
 
                         <View style={styles.customLinksHeaderRow}>
                           <Text style={styles.linkEditTitle}>Meus Links</Text>
@@ -1426,6 +1636,37 @@ export default function IndexScreen() {
           </ScrollView>
         </View>
       </View>
+
+      {/* Modal de detalhes do serviço: descrição independente e rolável */}
+      <Modal visible={isServiceModalVisible} transparent animationType="fade" onRequestClose={() => setIsServiceModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { maxHeight: "82%", width: "92%", maxWidth: 560 }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1, minWidth: 0, paddingRight: 12 }}>
+                <Text style={styles.modalTitle} numberOfLines={2}>{selectedService?.titulo || "Detalhes do serviço"}</Text>
+                <Text style={styles.modalSubtitle}>Informações do serviço</Text>
+              </View>
+              <TouchableOpacity style={styles.modalCloseButton} onPress={() => setIsServiceModalVisible(false)}>
+                <X size={19} color={theme.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalContent} contentContainerStyle={{ paddingBottom: 16 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
+              {(selectedService?.preco_min != null || selectedService?.preco_max != null) && <View style={{ marginBottom: 18, padding: 13, borderRadius: 10, backgroundColor: theme.mainBg, borderWidth: 1, borderColor: theme.borderColor }}>
+                <Text style={{ color: theme.textSecondary, fontSize: 11, marginBottom: 4 }}>Valor do serviço</Text>
+                <Text style={{ color: theme.accent, fontSize: 18, fontWeight: "800" }}>{selectedService?.preco_min != null && selectedService?.preco_max != null && Number(selectedService.preco_min) !== Number(selectedService.preco_max) ? `${Number(selectedService.preco_min).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} – ${Number(selectedService.preco_max).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : Number(selectedService?.preco_min ?? selectedService?.preco_max).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Text>
+              </View>}
+              <View style={{ padding: 13, borderRadius: 10, backgroundColor: theme.mainBg, borderWidth: 1, borderColor: theme.borderColor }}>
+                <Text style={{ color: theme.textPrimary, fontSize: 13, fontWeight: "700", marginBottom: 8 }}>Descrição</Text>
+                <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 21 }}>{selectedService?.descricao?.trim() || "Nenhuma descrição informada."}</Text>
+              </View>
+            </ScrollView>
+            <View style={{ flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 18, paddingVertical: 14, borderTopWidth: 1, borderTopColor: theme.borderColor, gap: 10 }}>
+              <TouchableOpacity onPress={() => setIsServiceModalVisible(false)} style={{ paddingHorizontal: 15, paddingVertical: 11, borderRadius: 8, borderWidth: 1, borderColor: theme.borderColor }}><Text style={{ color: theme.textPrimary, fontWeight: "600", fontSize: 12 }}>Fechar</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => { setIsServiceModalVisible(false); setIsEditingProfile(true); setEditedArtistServices(artistServices.map((item: any) => ({ ...item }))); }} style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 16, paddingVertical: 11, borderRadius: 8, backgroundColor: theme.accent }}><Pencil size={14} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 12 }}>Editar serviços</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal de Confirmação para se tornar Artista com o mesmo padrão do Editar Perfil */}
       <Modal
