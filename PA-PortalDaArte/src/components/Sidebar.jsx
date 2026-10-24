@@ -17,7 +17,7 @@ import Animated, {
 import { useTheme } from './context/ThemeContext';
 
 export const MENU_ITEMS = [
-  { id: 'explorar', label: 'Explorar', icon: Compass, route: '/pages/explorar/explorar' },
+  { id: 'explorar', label: 'Descobrir', icon: Compass, route: '/pages/explorar/explorar' },
   { id: 'favoritos', label: 'Favoritos', icon: Heart, route: '/pages/favoritos/favoritos' },
   { id: 'contratacoes', label: 'Contratações', icon: Calendar, route: '/pages/contratacoes/contratacoes' },
   { id: 'mensagens', label: 'Mensagens', icon: MessageSquare, route: '/pages/mensagens/mensagens' },
