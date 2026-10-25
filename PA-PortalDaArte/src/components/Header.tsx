@@ -9,8 +9,12 @@ import {
   Text,
   Modal
 } from 'react-native';
-import { Search, Bell, Settings, Sun, Moon, LogOut } from 'lucide-react-native';
+import { Search, Bell, Settings, Sun, Moon, LogOut, LogIn } from 'lucide-react-native';
 import { useTheme } from './context/ThemeContext';
+import { useWindowDimensions } from 'react-native';
+import { useAuth } from './context/AuthContext';
+import { useSearch } from './context/SearchContext';
+import { buildLoginHref, DISCOVER_ROUTE, normalizePath } from '../constants/auth-routes';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, usePathname } from 'expo-router';
 
@@ -21,8 +25,15 @@ export default function Header() {
   const [unreadNotifications, setUnreadNotifications] = useState<any[]>([]);
   const [userName, setUserName] = useState('U');
   
-  // Variáveis restauradas que corrigem o erro
-  const [searchText, setSearchText] = useState('');
+  // O texto da pesquisa é compartilhado via contexto: digitar não navega nem remonta o campo,
+  // e o campo continua mostrando o mesmo texto que filtra a lista de Descobrir.
+  const { query: searchText, setQuery: setSearchText } = useSearch();
+  const { status, signOut } = useAuth();
+  // Visitante confirmado (durante o carregamento inicial da sessão o botão da conta não troca de forma).
+  const isGuest = status === 'unauthenticated';
+  // Sem sessão não há Sidebar (onde fica a marca), então o Header mostra a logo à esquerda.
+  const showBrand = status !== 'authenticated';
+  const compact = useWindowDimensions().width < 900;
   const [profileImage, setProfileImage] = useState(null);
   const pathname = usePathname();
   const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://10.0.0.142:8000";
@@ -128,31 +139,27 @@ export default function Header() {
     };
   }, [pathname]);
 
-  // Atualiza os parâmetros da tela atual sem navegar/remontar a tela
-  // a cada tecla, para manter o foco e permitir digitar frases completas.
+  // A lista de Descobrir filtra em tempo real a partir do contexto; aqui não há navegação por tecla.
+  const isDiscoverScreen = normalizePath(pathname) === DISCOVER_ROUTE;
+
   const handleSearchChange = (text: string) => {
     setSearchText(text);
-
-    if (pathname.replace(/\/$/, '') === '/pages/explorar/explorar') {
-      router.setParams({ search: text });
-    }
   };
 
   const handleSearch = () => {
-    // Ao pressionar Enter fora do Explorar, abre a tela com o termo pesquisado.
-    if (pathname.replace(/\/$/, '') !== '/pages/explorar/explorar') {
+    // Enter fora de Descobrir leva para lá com o termo pesquisado (dentro dela a lista já está filtrada).
+    if (!isDiscoverScreen) {
       router.push({
-        pathname: '/pages/explorar/explorar',
+        pathname: DISCOVER_ROUTE,
         params: { search: searchText.trim() },
-      });
-    } else {
-      router.setParams({ search: searchText });
+      } as any);
     }
   };
 
   const handleLogout = async () => {
     try {
-      await AsyncStorage.removeItem('access_token');
+      // Limpa access_token, refresh_token e usuário (antes só o access_token era removido).
+      await signOut();
       setIsMenuVisible(false);
       setIsAvatarMenuVisible(false);
       router.replace('/pages/login/login');
@@ -163,21 +170,36 @@ export default function Header() {
 
   return (
     <View style={styles.header}>
-      <View style={styles.searchBar}>
+      {showBrand && (
+        <View style={[styles.brandSlot, compact && styles.brandSlotCompact]}>
+          <TouchableOpacity
+            onPress={() => router.navigate(DISCOVER_ROUTE as any)}
+            activeOpacity={0.8}
+            accessibilityRole="link"
+            accessibilityLabel="Portal da Arte, ir para Descobrir"
+          >
+            <Text style={[styles.brandTitle, compact && styles.brandTitleCompact]} numberOfLines={1}>
+              Portal da Arte
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View style={[styles.searchBar, showBrand && compact && styles.searchBarCompact]}>
         <Search size={18} color={theme.textSecondary} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Busque por artista, estilo musical ou instrumentos..."
+          placeholder="Busque por artista, estilo musical, instrumento ou serviço..."
           placeholderTextColor={theme.textSecondary}
           value={searchText}
           onChangeText={handleSearchChange}
           onSubmitEditing={handleSearch}
           returnKeyType="search"
-          accessibilityLabel="Buscar artistas por nome, estilo musical ou instrumento"
+          accessibilityLabel="Buscar artistas por nome, estilo musical, instrumento ou serviço"
         />
       </View>
 
-      <View style={styles.rightIcons}>
+      <View style={[styles.rightIcons, showBrand && !compact && styles.rightIconsWithBrand]}>
         <TouchableOpacity
           style={styles.iconButton}
           onPress={() => setIsNotificationsVisible(!isNotificationsVisible)}
@@ -196,21 +218,36 @@ export default function Header() {
           <Settings size={20} color={theme.textSecondary} />
         </TouchableOpacity>
 
-        {/* Botão da Foto de Perfil com Abertura de Menu */}
-        <TouchableOpacity 
-          style={styles.userAvatar}
-          onPress={() => setIsAvatarMenuVisible(!isAvatarMenuVisible)}
-          activeOpacity={0.8}
-        >
-          {profileImage ? (
-            <Image
-              source={{ uri: profileImage }}
-              style={styles.userAvatarImage}
-            />
-          ) : (
-            <Text style={styles.userAvatarText}>{userName}</Text>
-          )}
-        </TouchableOpacity>
+        {isGuest ? (
+          // Visitante: botão "Entrar" leva direto à tela de login.
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => router.push(buildLoginHref())}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Entrar"
+            testID="header-login-button"
+          >
+            <LogIn size={16} color="#FFFFFF" />
+            {!compact && <Text style={styles.loginButtonText}>Entrar</Text>}
+          </TouchableOpacity>
+        ) : (
+          /* Botão da Foto de Perfil com Abertura de Menu */
+          <TouchableOpacity 
+            style={styles.userAvatar}
+            onPress={() => setIsAvatarMenuVisible(!isAvatarMenuVisible)}
+            activeOpacity={0.8}
+          >
+            {profileImage ? (
+              <Image
+                source={{ uri: profileImage }}
+                style={styles.userAvatarImage}
+              />
+            ) : (
+              <Text style={styles.userAvatarText}>{userName}</Text>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Dropdown de notificações */}
@@ -367,6 +404,32 @@ const getStyles = (theme: any) => StyleSheet.create({
     color: theme.textPrimary,
     fontSize: 13,
   },
+  brandSlot: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  brandSlotCompact: {
+    flex: 0,
+    marginRight: 12,
+  },
+  brandTitle: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: theme.textPrimary,
+    fontFamily: "'Fraunces', serif",
+  },
+  brandTitleCompact: {
+    fontSize: 18,
+  },
+  searchBarCompact: {
+    flex: 1,
+    width: undefined,
+    marginRight: 12,
+  },
+  rightIconsWithBrand: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
   rightIcons: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -469,6 +532,21 @@ const getStyles = (theme: any) => StyleSheet.create({
     justifyContent: 'center',
     marginLeft: 4,
     overflow: 'hidden',
+  },
+  loginButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: theme.accent,
+    borderRadius: 20,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    marginLeft: 4,
+  },
+  loginButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
   },
   userAvatarText: {
     color: '#FFFFFF',

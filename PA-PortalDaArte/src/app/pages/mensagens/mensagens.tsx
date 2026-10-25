@@ -325,7 +325,7 @@ export default function MensagensScreen() {
                 {!loadingConversations && conversations.length === 0 ? (
                   <View style={styles.emptyConversations}>
                     <Text style={styles.pageSubtitle}>Você ainda não tem conversas.</Text>
-                    <Text style={styles.pageSubtitle}>Acesse Explorar e toque em “Ver perfil” para iniciar uma mensagem.</Text>
+                    <Text style={styles.pageSubtitle}>Acesse Descobrir e toque em “Ver perfil” para iniciar uma mensagem.</Text>
                   </View>
                 ) : null}
                 {conversations.map((item) => {

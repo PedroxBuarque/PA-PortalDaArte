@@ -13,13 +13,18 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { Lock } from "lucide-react-native";
+import { buildLoginHref, sanitizeRedirect } from "../../../constants/auth-routes";
 
 const DOC_TYPES = ["CPF", "CNPJ", "MEI"];
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export default function RegisterScreen() {
+  // O cadastro não faz login automático: o destino pretendido segue junto até o login.
+  const params = useLocalSearchParams<{ redirect?: string | string[] }>();
+  const redirect = sanitizeRedirect(params.redirect);
+
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
@@ -149,7 +154,7 @@ export default function RegisterScreen() {
         return;
       }
 
-      router.replace("/pages/login/login" as any);
+      router.replace(buildLoginHref(redirect));
     } catch (err) {
       console.log("Erro de conexão no cadastro:", err);
       setError("Não foi possível conectar ao servidor. Verifique sua conexão.");
@@ -381,7 +386,7 @@ export default function RegisterScreen() {
               <Text style={styles.footerText}>Já tem conta?</Text>
               <TouchableOpacity
                 activeOpacity={0.7}
-                onPress={() => router.push("/pages/login/login" as any)}
+                onPress={() => router.push(buildLoginHref(redirect))}
               >
                 <Text style={styles.footerLink}>Entrar</Text>
               </TouchableOpacity>

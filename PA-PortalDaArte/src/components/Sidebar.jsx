@@ -15,13 +15,14 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useTheme } from './context/ThemeContext';
+import { useAuth } from './context/AuthContext';
 
 export const MENU_ITEMS = [
   { id: 'explorar', label: 'Descobrir', icon: Compass, route: '/pages/explorar/explorar' },
-  { id: 'favoritos', label: 'Favoritos', icon: Heart, route: '/pages/favoritos/favoritos' },
-  { id: 'contratacoes', label: 'Contratações', icon: Calendar, route: '/pages/contratacoes/contratacoes' },
-  { id: 'mensagens', label: 'Mensagens', icon: MessageSquare, route: '/pages/mensagens/mensagens' },
-  { id: 'perfil', label: 'Perfil', icon: User, route: '/pages/perfil/perfil' },
+  { id: 'favoritos', label: 'Favoritos', icon: Heart, route: '/pages/favoritos/favoritos', private: true },
+  { id: 'contratacoes', label: 'Contratações', icon: Calendar, route: '/pages/contratacoes/contratacoes', private: true },
+  { id: 'mensagens', label: 'Mensagens', icon: MessageSquare, route: '/pages/mensagens/mensagens', private: true },
+  { id: 'perfil', label: 'Perfil', icon: User, route: '/pages/perfil/perfil', private: true },
 ];
 
 const SPRING_CONFIG = {
@@ -84,10 +85,16 @@ export default function Sidebar() {
     opacity: activeOpacity.value,
   }));
 
+  const { status, requireAuth } = useAuth();
+
   const handleNavigation = (item) => {
-    if (item.route) {
-      router.navigate(item.route);
+    if (!item.route) return;
+    // Itens privados: visitante vê o AuthModal (com o destino guardado) em vez de navegar.
+    if (item.private && status !== 'authenticated') {
+      requireAuth(() => router.navigate(item.route), item.route);
+      return;
     }
+    router.navigate(item.route);
   };
 
   return (

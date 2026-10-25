@@ -9,13 +9,19 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { ArrowLeft, Lock, Mail } from "lucide-react-native";
 import { salvarLogin } from "../../services/auth";
+import { refreshSession } from "../../../components/context/AuthContext";
+import { buildRegisterHref, DISCOVER_ROUTE, sanitizeRedirect } from "../../../constants/auth-routes";
 
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export default function LoginScreen() {
+  // Destino que o visitante queria abrir antes de ser mandado ao login (validado: só rotas internas).
+  const params = useLocalSearchParams<{ redirect?: string | string[] }>();
+  const redirect = sanitizeRedirect(params.redirect);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -52,7 +58,9 @@ export default function LoginScreen() {
       }
 
       await salvarLogin(data);
-      router.replace("/pages/explorar/explorar" as any);
+      // Atualiza o estado de sessão antes de navegar, para o guard já enxergar o usuário logado.
+      await refreshSession();
+      router.replace((redirect ?? DISCOVER_ROUTE) as any);
     } catch (err) {
       console.log("Erro de conexão no login:", err);
       setError("Não foi possível conectar ao servidor. Verifique sua conexão.");
@@ -255,7 +263,7 @@ export default function LoginScreen() {
             <Text style={styles.registerText}>Não tem conta?</Text>
             <TouchableOpacity
               activeOpacity={0.7}
-              onPress={() => router.push("/pages/cadastro/cadastro" as any)}
+              onPress={() => router.push(buildRegisterHref(redirect))}
             >
               <Text style={styles.registerLink}>Cadastre-se</Text>
             </TouchableOpacity>
