@@ -125,7 +125,7 @@ export default function PerfilPublicoScreen() {
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.8}>
               <ArrowLeft size={17} color={theme.textPrimary} />
-              <Text style={styles.backText}>Voltar para explorar</Text>
+              <Text style={styles.backText}>Voltar para Descobrir</Text>
             </TouchableOpacity>
 
             {loading ? (

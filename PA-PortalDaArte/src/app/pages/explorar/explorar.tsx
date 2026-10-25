@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
   Image,
@@ -18,7 +18,10 @@ import {
 import Header from "../../../components/Header";
 import Sidebar from "../../../components/Sidebar";
 import { useTheme } from "../../../components/context/ThemeContext";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useAuth } from "../../../components/context/AuthContext";
+import { useSearch } from "../../../components/context/SearchContext";
+import { ARTIST_PROFILE_ROUTE, DISCOVER_ROUTE } from "../../../constants/auth-routes";
 
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -131,6 +134,15 @@ const haversineKm = (a: { lat: number; lon: number }, b: { lat: number; lon: num
 
 const firstValue = (...values: any[]) => values.find((value) => value !== undefined && value !== null && value !== "" && !(Array.isArray(value) && value.length === 0));
 
+// Texto do primeiro valor existente, ou "" quando o campo não existe (evita exibir "undefined").
+const textOrEmpty = (...values: any[]): string => {
+  const value = firstValue(...values);
+  return value === undefined ? "" : String(value);
+};
+
+// Remove acentos e caixa para comparar textos na pesquisa.
+const foldText = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
 const toText = (value: any): string => {
   if (typeof value === "string" || typeof value === "number") return String(value);
   if (Array.isArray(value)) return value.map(toText).filter(Boolean).join(" ");
@@ -145,7 +157,8 @@ const normalizeArtist = (raw: any, index: number): Artist => {
   const categoryText = toText(categories);
   const serviceText = toText(services);
   const name = String(firstValue(raw.nome_artistico, raw.nome, raw.name, raw.nome_completo, raw.name_artistico, "Artista"));
-  const style = String(firstValue(raw.estilo_musical, raw.estilo, raw.style, raw.instrumento, raw.instrument, serviceText, categoryText, "Artista independente"));
+  // Só usa dados que existem no banco; sem categoria/estilo, o card simplesmente não mostra a etiqueta.
+  const style = textOrEmpty(raw.estilo_musical, raw.estilo, raw.style, raw.instrumento, raw.instrument, serviceText, categoryText);
   const categorySource = categoryText.toLowerCase();
   const category = /banda/.test(categorySource) ? "Bandas"
     : /foto/.test(categorySource) ? "Fotógrafos"
@@ -153,9 +166,10 @@ const normalizeArtist = (raw: any, index: number): Artist => {
     : /dan[cç]|core[oó]g/.test(categorySource) ? "Dançarinos"
     : /m[uú]sic|cant|instrument|forr[oó]|samba|mpb|rock|dj/.test((categoryText + " " + style).toLowerCase()) ? "Músicos"
     : "Todos os artistas";
-  const searchableText = [name, categoryText, serviceText, style, raw.biografia, raw.bio, raw.instrumentos, raw.instruments, raw.descricao, raw.description]
-    .map(toText).join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const serviceRecords = Array.isArray(services) ? services : [];
+  const serviceDetails = serviceRecords.map((service: any) => [service?.titulo, service?.nome, service?.descricao].map(toText).join(" "));
+  const searchableText = foldText([name, categoryText, serviceText, ...serviceDetails, style, raw.biografia, raw.bio, raw.instrumentos, raw.instruments, raw.descricao, raw.description]
+    .map(toText).join(" "));
   const servicePrice = serviceRecords
     .map((service: any) => firstValue(service.preco_min, service.preco, service.price, service.valor_hora))
     .find((value: any) => value !== undefined && value !== null && value !== "");
@@ -174,8 +188,8 @@ const normalizeArtist = (raw: any, index: number): Artist => {
     reviews: Number(firstValue(raw.total_avaliacoes, raw.reviews, raw.avaliacoes, 0)) || 0,
     price,
     distanceKm: Number(firstValue(raw.distanceKm, raw.distancia_km, raw.distancia, NaN)),
-    city: String(firstValue(raw.cidade_atendimento, raw.cidade, raw.city, raw.municipio, raw.nome_municipio, raw.localidade, "")),
-    state: String(firstValue(raw.estado_atendimento, raw.estado, raw.state, raw.uf, raw.sigla_estado, raw.estado_sigla, "")),
+    city: textOrEmpty(raw.cidade_atendimento, raw.cidade, raw.city, raw.municipio, raw.nome_municipio, raw.localidade),
+    state: textOrEmpty(raw.estado_atendimento, raw.estado, raw.state, raw.uf, raw.sigla_estado, raw.estado_sigla),
     favorite: false,
     avatarUrl: firstValue(raw.foto_perfil_url, raw.foto_url, raw.avatar_url, raw.profile_image, profile.foto_perfil_url, profile.foto_url, profile.avatar_url, null),
     searchableText,
@@ -199,6 +213,10 @@ type Artist = {
   avatarUrl?: string | null;
   searchableText: string;
 };
+
+// Erros que já têm mensagem própria para o usuário (os demais viram a mensagem genérica de conexão).
+const apiError = (message: string) => Object.assign(new Error(message), { fromApi: true });
+const CONNECTION_ERROR = "Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.";
 
 const SORT_OPTIONS = [
   { id: "rating", label: "Mais bem avaliados" },
@@ -229,10 +247,25 @@ export default function ExplorarScreen() {
   const isMobile = width < 900; // Define se é tela de celular/tablet pequeno
   const params = useLocalSearchParams<{ search?: string }>();
   const router = useRouter();
-  const searchQuery = (Array.isArray(params.search) ? params.search[0] : params.search || "").trim();
+  const { requireAuth, status } = useAuth();
+  // Visitante vê o layout público (sem Sidebar); a Sidebar só entra com a sessão autenticada.
+  const showSidebar = !isMobile && status === "authenticated";
+  // O texto vem da barra de pesquisa do Header (contexto compartilhado). useDeferredValue mantém
+  // a digitação fluida: o campo atualiza na hora e a lista acompanha logo em seguida.
+  const { query, setQuery } = useSearch();
+  const searchQuery = useDeferredValue(query).trim();
+  const paramSearch = Array.isArray(params.search) ? params.search[0] : params.search;
+
+  // Compatível com links antigos (?search=termo): aplica o termo da URL na barra de pesquisa.
+  useEffect(() => {
+    if (typeof paramSearch === "string") setQuery(paramSearch);
+  }, [paramSearch, setQuery]);
 
   const [artists, setArtists] = useState<Artist[]>([]);
   const [loadingArtists, setLoadingArtists] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const latestRequest = useRef(0);
+  const hasLoadedOnce = useRef(false);
   const [artistsError, setArtistsError] = useState("");
   const [category, setCategory] = useState("Todos os artistas");
   const [minPrice, setMinPrice] = useState("0");
@@ -268,35 +301,61 @@ export default function ExplorarScreen() {
       .catch(() => setIbgeCities([]));
   }, [selectedState]);
 
-  useEffect(() => {
-    let active = true;
-    const loadArtists = async () => {
+  // Carrega os artistas cadastrados no banco (GET /api/artistas, público).
+  // `silent` = atualização em segundo plano: mantém a lista atual na tela e não mostra "carregando".
+  const loadArtists = useCallback(async (silent = false) => {
+    const request = ++latestRequest.current;
+    if (!silent) {
       setLoadingArtists(true);
       setArtistsError("");
-      try {
-        // Endpoint público esperado: GET /api/artistas retorna os perfis ativos do banco.
-        const response = await fetch(`${URL_API}/api/artistas`);
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.detail || "Não foi possível carregar os artistas.");
-        }
-        const rows = Array.isArray(payload)
-          ? payload
-          : firstValue(payload.artistas, payload.items, payload.results, payload.data, []);
-        if (!Array.isArray(rows)) throw new Error("A API retornou uma lista de artistas inválida.");
-        if (active) setArtists(rows.map(normalizeArtist));
-      } catch (error: any) {
-        if (active) {
-          setArtists([]);
-          setArtistsError(error?.message || "Falha ao conectar com a API de artistas.");
-        }
-      } finally {
-        if (active) setLoadingArtists(false);
+    }
+    try {
+      const response = await fetch(`${URL_API}/api/artistas`);
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw apiError(payload?.detail || "Não foi possível carregar os artistas.");
       }
-    };
-    loadArtists();
-    return () => { active = false; };
+      // Atenção: firstValue() ignora arrays vazios, então aqui se procura o primeiro ARRAY (mesmo vazio):
+      // um banco sem artistas ({"artistas": []}) é uma lista vazia válida, não um erro.
+      const rows = Array.isArray(payload)
+        ? payload
+        : [payload?.artistas, payload?.items, payload?.results, payload?.data].find(Array.isArray);
+      if (!Array.isArray(rows)) throw apiError("A API retornou uma lista de artistas inválida.");
+      if (request !== latestRequest.current) return;
+      const loaded = rows.map(normalizeArtist);
+      // Mantém as distâncias já calculadas quando a lista é atualizada em segundo plano.
+      setArtists((current) => {
+        const known = new Map(current.map((artist) => [artist.id, artist.distanceKm]));
+        return loaded.map((artist) => known.has(artist.id) ? { ...artist, distanceKm: known.get(artist.id) as number } : artist);
+      });
+      setArtistsError("");
+      hasLoadedOnce.current = true;
+    } catch (error: any) {
+      if (request !== latestRequest.current) return;
+      // Numa atualização em segundo plano, quem já está vendo a lista continua vendo.
+      if (silent && hasLoadedOnce.current) return;
+      setArtists([]);
+      setArtistsError(error?.fromApi ? error.message : CONNECTION_ERROR);
+    } finally {
+      if (request === latestRequest.current) {
+        setLoadingArtists(false);
+        setRefreshing(false);
+      }
+    }
   }, []);
+
+  // Carrega ao abrir a tela e recarrega ao voltar para ela, para artistas recém-cadastrados aparecerem.
+  useFocusEffect(
+    useCallback(() => {
+      void loadArtists(hasLoadedOnce.current);
+      return () => { latestRequest.current += 1; };
+    }, [loadArtists]),
+  );
+
+  const refreshArtists = () => {
+    setRefreshing(true);
+    void loadArtists(true);
+  };
 
   // Calcula distâncias em linha reta e atualiza os artistas progressivamente.
   // Assim, o filtro não fica esperando a geocodificação de todas as cidades.
@@ -401,9 +460,10 @@ export default function ExplorarScreen() {
 
   // RECOMENDAÇÃO SIMULADA APLICADA AQUI
   const filteredArtists = useMemo(() => {
-    const normalizedQuery = searchQuery.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    // Cada palavra digitada precisa aparecer em nome, estilo, instrumento ou serviços (ex.: "violão forró").
+    const searchTerms = foldText(searchQuery).split(/\s+/).filter(Boolean);
     const result = artists.filter((artist) => {
-      const matchesSearch = !normalizedQuery || artist.searchableText.includes(normalizedQuery);
+      const matchesSearch = searchTerms.every((term) => artist.searchableText.includes(term));
       const matchesCategory =
         category === "Todos os artistas" || artist.category === category;
       const matchesPrice =
@@ -452,8 +512,20 @@ export default function ExplorarScreen() {
       );
   };
 
-  const toggleFavorite = (id: number) => {
-    setFavorites((current) => ({ ...current, [id]: !current[id] }));
+  // Favoritar e abrir o perfil completo exigem conta. Visitante é levado à tela de login, que guarda a
+  // intenção (?redirect=) para retomar de onde parou depois de entrar.
+  const toggleFavorite = (id: number) =>
+    requireAuth(() => {
+      setFavorites((current) => ({ ...current, [id]: !current[id] }));
+    }, DISCOVER_ROUTE, "login");
+
+  const openArtistProfile = (artist: Artist) => {
+    const id = String(artist.id);
+    return requireAuth(
+      () => router.push({ pathname: ARTIST_PROFILE_ROUTE, params: { id } } as any),
+      `${ARTIST_PROFILE_ROUTE}?id=${encodeURIComponent(id)}`,
+      "login",
+    );
   };
 
   const clearFilters = () => {
@@ -494,9 +566,11 @@ export default function ExplorarScreen() {
               <Text style={styles.avatarEmoji}>{item.emoji}</Text>
             )}
           </View>
-          <View style={styles.tag}>
-            <Text style={styles.tagText}>{item.style}</Text>
-          </View>
+          {item.style ? (
+            <View style={styles.tag}>
+              <Text style={styles.tagText}>{item.style}</Text>
+            </View>
+          ) : null}
         </View>
         <Text style={styles.artistName}>{item.name}</Text>
         <Text style={styles.artistRating}>
@@ -507,7 +581,7 @@ export default function ExplorarScreen() {
         <TouchableOpacity
           style={styles.profileButton}
           activeOpacity={0.85}
-          onPress={() => router.push({ pathname: "/pages/perfil_publico/perfil_publico", params: { id: String(item.id) } } as any)}
+          onPress={() => openArtistProfile(item)}
         >
           <Text style={styles.profileButtonText}>Ver perfil</Text>
         </TouchableOpacity>
@@ -684,7 +758,7 @@ export default function ExplorarScreen() {
       />
 
       <View style={styles.dashboardContainer}>
-        {!isMobile && <Sidebar />}
+        {showSidebar && <Sidebar />}
 
         <View style={styles.rightArea}>
           <Header />
@@ -773,14 +847,33 @@ export default function ExplorarScreen() {
                 showsVerticalScrollIndicator={false}
                 onEndReached={loadMore}
                 onEndReachedThreshold={0.55}
+                refreshing={refreshing}
+                onRefresh={refreshArtists}
                 ListEmptyComponent={
                   <View style={styles.emptyState}>
                     <Text style={styles.emptyTitle}>
-                      {loadingArtists ? "Carregando artistas..." : artistsError ? "Não foi possível carregar os artistas" : "Nenhum artista encontrado"}
+                      {loadingArtists
+                        ? "Carregando artistas..."
+                        : artistsError
+                          ? "Não foi possível carregar os artistas"
+                          : artists.length === 0
+                            ? "Ainda não há artistas cadastrados"
+                            : "Nenhum artista encontrado"}
                     </Text>
                     <Text style={styles.emptyText}>
-                      {loadingArtists ? "Buscando perfis cadastrados no banco de dados." : artistsError ? `${artistsError} Confira se a API está ligada e se o endpoint GET /api/artistas está disponível.` : "Tente outra busca ou limpe os filtros."}
+                      {loadingArtists
+                        ? "Buscando os artistas cadastrados."
+                        : artistsError
+                          ? artistsError
+                          : artists.length === 0
+                            ? "Quando novos artistas se cadastrarem, eles aparecerão aqui."
+                            : "Tente outra busca ou limpe os filtros."}
                     </Text>
+                    {!loadingArtists && (artistsError || artists.length === 0) ? (
+                      <TouchableOpacity style={styles.retryButton} activeOpacity={0.85} onPress={() => loadArtists(false)}>
+                        <Text style={styles.profileButtonText}>{artistsError ? "Tentar novamente" : "Atualizar"}</Text>
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
                 }
                 ListFooterComponent={
@@ -1040,6 +1133,14 @@ const getStyles = (theme: any) =>
       marginTop: "auto",
     },
     profileButtonText: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
+    retryButton: {
+      backgroundColor: theme.accent,
+      paddingVertical: 11,
+      paddingHorizontal: 26,
+      borderRadius: 30,
+      alignItems: "center",
+      marginTop: 18,
+    },
     listFooter: { alignItems: "center", paddingVertical: 16 },
     loadingText: { color: theme.textSecondary, fontSize: 13 },
     emptyState: {
