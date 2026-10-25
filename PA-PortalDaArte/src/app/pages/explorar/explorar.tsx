@@ -21,7 +21,8 @@ import { useTheme } from "../../../components/context/ThemeContext";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useAuth } from "../../../components/context/AuthContext";
 import { useSearch } from "../../../components/context/SearchContext";
-import { ARTIST_PROFILE_ROUTE, DISCOVER_ROUTE } from "../../../constants/auth-routes";
+import { useFavorites } from "../../../components/context/FavoritesContext";
+import { ARTIST_PROFILE_ROUTE, DISCOVER_ROUTE, FAVORITES_ROUTE } from "../../../constants/auth-routes";
 
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -284,7 +285,7 @@ export default function ExplorarScreen() {
   const [sortOpen, setSortOpen] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [visibleCount, setVisibleCount] = useState(6);
-  const [favorites, setFavorites] = useState<Record<number, boolean>>({});
+  const { favoriteIds, isFavorite, addFavorite, removeFavorite, whenReady } = useFavorites();
 
   useEffect(() => {
     fetch("https://servicodados.ibge.gov.br/api/v1/localidades/estados?orderBy=nome")
@@ -514,9 +515,17 @@ export default function ExplorarScreen() {
 
   // Favoritar e abrir o perfil completo exigem conta. Visitante é levado à tela de login, que guarda a
   // intenção (?redirect=) para retomar de onde parou depois de entrar.
-  const toggleFavorite = (id: number) =>
-    requireAuth(() => {
-      setFavorites((current) => ({ ...current, [id]: !current[id] }));
+  // Coração: visitante vai ao login. Logado, ♡ adiciona o artista aos favoritos e leva para a tela de
+  // Favoritos; ♥ (já favoritado) remove e permanece em Descobrir.
+  const toggleFavorite = (artist: Artist) =>
+    requireAuth(async () => {
+      await whenReady();
+      if (isFavorite(artist.id)) {
+        await removeFavorite(artist.id);
+        return;
+      }
+      await addFavorite(artist);
+      router.push(FAVORITES_ROUTE as any);
     }, DISCOVER_ROUTE, "login");
 
   const openArtistProfile = (artist: Artist) => {
@@ -541,16 +550,16 @@ export default function ExplorarScreen() {
   const formatPrice = (value: number) => `R$ ${value.toLocaleString("pt-BR")}`;
 
   const renderArtist = ({ item }: { item: Artist }) => {
-    const isFavorite = favorites[item.id] ?? item.favorite ?? false;
+    const isFav = favoriteIds.some((id) => String(id) === String(item.id));
 
     return (
       <View style={[styles.artistCard, isMobile && styles.artistCardMobile]}>
         <TouchableOpacity
           style={styles.cardHeart}
-          onPress={() => toggleFavorite(item.id)}
+          onPress={() => toggleFavorite(item)}
         >
-          <Text style={isFavorite ? styles.heartIconActive : styles.heartIcon}>
-            {isFavorite ? "♥" : "♡"}
+          <Text style={isFav ? styles.heartIconActive : styles.heartIcon}>
+            {isFav ? "♥" : "♡"}
           </Text>
         </TouchableOpacity>
         <View style={styles.avatarWrapper}>

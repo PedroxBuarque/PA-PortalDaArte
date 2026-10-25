@@ -17,6 +17,7 @@ export const REGISTER_ROUTE = "/pages/cadastro/cadastro";
 // "Descobrir": o caminho do arquivo foi preservado (explorar) para não quebrar links.
 export const DISCOVER_ROUTE = "/pages/explorar/explorar";
 export const ARTIST_PROFILE_ROUTE = "/pages/perfil_publico/perfil_publico";
+export const FAVORITES_ROUTE = "/pages/favoritos/favoritos";
 
 const PUBLIC_ROUTES = new Set<string>([
   "/",
