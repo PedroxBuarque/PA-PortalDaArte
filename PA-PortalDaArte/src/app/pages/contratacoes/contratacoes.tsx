@@ -1,3 +1,28 @@
+// import React from 'react';
+// import {
+//   StyleSheet,
+//   Text,
+//   View,
+//   SafeAreaView,
+//   StatusBar,
+//   ScrollView,
+//   Platform,
+// } from 'react-native';
+// import {
+//   Music,
+//   Headphones,
+//   Mic,
+// } from 'lucide-react-native';
+
+// import CardContratacao, {
+//   type Contratacao,
+// } from '../../../components/contratacoes/CardContratacao';
+
+// // Importações dos Componentes e do Contexto
+// import Sidebar from '../../../components/Sidebar';
+// import Header from '../../../components/Header';
+// import { useTheme } from '../../../components/context/ThemeContext';
+
 import React from 'react';
 import {
   StyleSheet,
@@ -8,67 +33,15 @@ import {
   ScrollView,
   Platform,
 } from 'react-native';
-import {
-  Music,
-  Headphones,
-  Mic,
-} from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 
-// Importações dos Componentes e do Contexto
+import CardContratacao from '../../../components/contratacoes/CardContratacao';
+import { CONTRATACOES_LIST } from '../../../components/contratacoes/contratacoesData';
+
 import Sidebar from '../../../components/Sidebar';
 import Header from '../../../components/Header';
 import { useTheme } from '../../../components/context/ThemeContext';
 
-const CONTRATACOES_LIST = [
-  {
-    id: '1',
-    name: 'Lucas Andrade',
-    category: 'Violão e Voz',
-    date: '24/11/2026 - 20:00',
-    location: 'Recife, PE',
-    status: 'Pendente',
-    icon: Music,
-    darkBgColor: '#3D2218',
-    lightBgColor: '#FDE4D9',
-    iconColor: '#E05A10',
-  },
-  {
-    id: '2',
-    name: 'Banda Vereda',
-    category: 'Forró • 5 integrantes',
-    date: '24/11/2026 - 20:00',
-    location: 'São Paulo, SP',
-    status: 'Confirmado',
-    icon: Music,
-    darkBgColor: '#412C1B',
-    lightBgColor: '#FDE4D9',
-    iconColor: '#E05A10',
-  },
-  {
-    id: '3',
-    name: 'DJ Marina',
-    category: 'Eletrônica • DJ Set',
-    date: '24/11/2026 - 20:00',
-    location: 'Recife, PE',
-    status: 'Concluido',
-    icon: Headphones,
-    darkBgColor: '#2E2243',
-    lightBgColor: '#EBE4FA',
-    iconColor: '#8C52FF',
-  },
-  {
-    id: '4',
-    name: 'Juliana Diniz',
-    category: 'MPB • Cantora',
-    date: '24/11/2026 - 20:00',
-    location: 'Recife, PE',
-    status: 'Concluido',
-    icon: Mic,
-    darkBgColor: '#1B3736',
-    lightBgColor: '#E0F2F1',
-    iconColor: '#20B2AA',
-  },
-];
 
 // Função auxiliar para definir as cores da etiqueta de status
 const getStatusStyles = (status: string) => {
@@ -85,6 +58,7 @@ const getStatusStyles = (status: string) => {
 };
 
 export default function ContratacoesScreen() {
+  const router = useRouter();
   const { theme, isLightMode } = useTheme();
   const styles = getStyles(theme);
 
@@ -113,36 +87,23 @@ export default function ContratacoesScreen() {
                 <Text style={styles.pageTitle}>Contratações</Text>
               </View>
 
+              
               <View style={styles.cardsContainer}>
-                {CONTRATACOES_LIST.map((item) => {
-                  const IconComponent = item.icon;
-                  const avatarBg = isLightMode ? item.lightBgColor : item.darkBgColor;
-
-                  return (
-                    <View key={item.id} style={styles.card}>
-                      <View style={styles.cardLeftGroup}>
-                        <View style={[styles.avatarContainer, { backgroundColor: avatarBg }]}>
-                          <IconComponent size={24} color={item.iconColor} />
-                        </View>
-                        <View style={styles.artistDetails}>
-                          <View style={styles.nameCategoryRow}>
-                            <Text style={styles.artistName}>{item.name}</Text>
-                            <Text style={styles.artistCategory}>{item.category}</Text>
-                          </View>
-                          <Text style={styles.infoText}>{item.date}</Text>
-                          <Text style={styles.infoText}>{item.location}</Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.cardRightGroup}>
-                        <View style={[styles.statusBadge, getStatusStyles(item.status)]}>
-                          <Text style={styles.statusText}>{item.status}</Text>
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })}
+                {CONTRATACOES_LIST.map((item) => (
+                  <CardContratacao
+                    key={item.id}
+                    item={item}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/pages/contratacoes/detalhes',
+                        params: { id: item.id },
+                      })
+                    }
+                  />
+                ))}
               </View>
+
+                      
             </View>
           </ScrollView>
 
