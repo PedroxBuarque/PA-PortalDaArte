@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import {
   ActivityIndicator,
@@ -45,6 +45,22 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Header from "../../../components/Header";
 import Sidebar from "../../../components/Sidebar";
 import { useTheme } from "../../../components/context/ThemeContext";
+import {
+  openPortfolioFile,
+  portfolioApiError,
+  portfolioCoverFromApi,
+  portfolioFileFromApi,
+  portfolioFormData,
+  portfolioNotice,
+  PORTFOLIO_PICKER_TYPES,
+  PORTFOLIO_COVER_TYPES,
+  PORTFOLIO_VIDEO_TYPES,
+  releasePortfolioAsset,
+  validatePortfolioAsset,
+  validatePortfolioCover,
+  validatePortfolioVideo,
+} from "../../../services/portfolio";
+import type { PortfolioApiItem, PortfolioFile } from "../../../services/portfolio";
 
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -52,9 +68,17 @@ type PortfolioItem = {
   id: string;
   name: string;
   description: string;
-  file: any;
+  file: PortfolioFile | null;
   isFeatured?: boolean;
 };
+
+const toPortfolioItem = (item: PortfolioApiItem): PortfolioItem => ({
+  id: String(item.portfolio_id || item.id),
+  name: item.titulo || "Trabalho artístico",
+  description: item.descricao || "",
+  file: portfolioFileFromApi(item),
+  isFeatured: false,
+});
 
 type VideoItem = {
   id: string;
@@ -65,6 +89,16 @@ type VideoItem = {
   type: "music" | "headphones" | "mic";
   isFeatured?: boolean;
 };
+
+const toVideoItem = (item: PortfolioApiItem): VideoItem => ({
+  id: String(item.portfolio_id || item.id),
+  title: item.titulo || "Vídeo",
+  subtitle: item.descricao || "",
+  file: portfolioFileFromApi(item),
+  cover: portfolioCoverFromApi(item),
+  type: "music",
+  isFeatured: false,
+});
 
 type CustomLink = {
   id: string;
@@ -174,6 +208,20 @@ export default function IndexScreen() {
   const [portfolioDescription, setPortfolioDescription] = useState("");
   const [portfolioFile, setPortfolioFile] = useState<any>(null);
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
+  const [isSavingPortfolio, setIsSavingPortfolio] = useState(false);
+  const [deletingPortfolioIds, setDeletingPortfolioIds] = useState<string[]>([]);
+  const portfolioSavingRef = useRef(false);
+  const portfolioDeletingRef = useRef(new Set<string>());
+  const portfolioFileRef = useRef<DocumentPicker.DocumentPickerAsset | null>(null);
+  const portfolioMountedRef = useRef(true);
+  const portfolioModalSession = useRef(0);
+  const portfolioMutationVersion = useRef(0);
+
+  const replacePortfolioFile = (asset: DocumentPicker.DocumentPickerAsset | null) => {
+    if (portfolioFileRef.current !== asset) releasePortfolioAsset(portfolioFileRef.current);
+    portfolioFileRef.current = asset;
+    setPortfolioFile(asset);
+  };
 
   const [videoModalVisible, setVideoModalVisible] = useState(false);
   const [videoTitle, setVideoTitle] = useState("");
@@ -181,6 +229,38 @@ export default function IndexScreen() {
   const [videoFile, setVideoFile] = useState<any>(null);
   const [videoCover, setVideoCover] = useState<any>(null);
   const [videoItems, setVideoItems] = useState<VideoItem[]>([]);
+  const [isSavingVideo, setIsSavingVideo] = useState(false);
+  const videoSavingRef = useRef(false);
+  const videoFileRef = useRef<DocumentPicker.DocumentPickerAsset | null>(null);
+  const videoCoverRef = useRef<DocumentPicker.DocumentPickerAsset | null>(null);
+  const videoModalSession = useRef(0);
+
+  const replaceVideoFile = (asset: DocumentPicker.DocumentPickerAsset | null) => {
+    if (videoFileRef.current !== asset) releasePortfolioAsset(videoFileRef.current);
+    videoFileRef.current = asset;
+    setVideoFile(asset);
+  };
+
+  const replaceVideoCover = (asset: DocumentPicker.DocumentPickerAsset | null) => {
+    if (videoCoverRef.current !== asset) releasePortfolioAsset(videoCoverRef.current);
+    videoCoverRef.current = asset;
+    setVideoCover(asset);
+  };
+
+  useEffect(() => {
+    portfolioMountedRef.current = true;
+    return () => {
+      portfolioMountedRef.current = false;
+      portfolioModalSession.current += 1;
+      videoModalSession.current += 1;
+      releasePortfolioAsset(portfolioFileRef.current);
+      releasePortfolioAsset(videoFileRef.current);
+      releasePortfolioAsset(videoCoverRef.current);
+      portfolioFileRef.current = null;
+      videoFileRef.current = null;
+      videoCoverRef.current = null;
+    };
+  }, []);
 
   // Busca isolada e estrita do perfil da conta logada
   useEffect(() => {
@@ -282,23 +362,23 @@ export default function IndexScreen() {
       try {
         const token = await AsyncStorage.getItem("access_token");
         if (!token) return;
-        const response = await fetch(`${URL_API}/api/me/portfolio`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const payload = await response.json();
-        if (!response.ok) return;
-        const rows = Array.isArray(payload.portfolio) ? payload.portfolio : [];
-        if (active) {
-          setPortfolioItems(rows.map((item: any) => ({
-            id: String(item.portfolio_id || item.id),
-            name: item.titulo || "Trabalho artístico",
-            description: item.descricao || "",
-            file: null,
-            isFeatured: false,
-          })));
+        while (active) {
+          const version = portfolioMutationVersion.current;
+          const response = await fetch(`${URL_API}/api/me/portfolio`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(portfolioApiError(payload, "Não foi possível carregar o portfólio."));
+          if (!active) return;
+          // Uma resposta anterior a um envio/exclusão não deve sobrescrever a tela.
+          if (version !== portfolioMutationVersion.current) continue;
+          const rows: PortfolioApiItem[] = Array.isArray(payload.portfolio) ? payload.portfolio : [];
+          setPortfolioItems(rows.filter((item) => item.secao !== "video").map(toPortfolioItem));
+          setVideoItems(rows.filter((item) => item.secao === "video").map(toVideoItem));
+          break;
         }
-      } catch (error) {
-        console.warn("Não foi possível carregar o portfólio", error);
+      } catch (error: any) {
+        if (active) portfolioNotice("Portfólio", error?.message || "Não foi possível carregar o portfólio.");
       }
     })();
     return () => { active = false; };
@@ -680,61 +760,119 @@ export default function IndexScreen() {
   };
 
   const openPortfolioModal = () => {
+    if (portfolioSavingRef.current || videoSavingRef.current) return;
+    portfolioModalSession.current += 1;
     setPortfolioName("");
     setPortfolioDescription("");
-    setPortfolioFile(null);
+    replacePortfolioFile(null);
     setPortfolioModalVisible(true);
   };
 
-  const closePortfolioModal = () => setPortfolioModalVisible(false);
+  const closePortfolioModal = () => {
+    if (portfolioSavingRef.current) return;
+    portfolioModalSession.current += 1;
+    replacePortfolioFile(null);
+    setPortfolioModalVisible(false);
+  };
 
   const handlePickFile = async () => {
+    if (portfolioSavingRef.current) return;
+    const session = portfolioModalSession.current;
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: "*/*",
+        type: PORTFOLIO_PICKER_TYPES,
         copyToCacheDirectory: true,
         multiple: false,
+        base64: false,
       });
-      if (!result.canceled && result.assets?.length > 0)
-        setPortfolioFile(result.assets[0]);
-    } catch (error) {
-      console.error(error);
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      if (!portfolioMountedRef.current || session !== portfolioModalSession.current || portfolioSavingRef.current) {
+        releasePortfolioAsset(asset);
+        return;
+      }
+      try {
+        validatePortfolioAsset(asset);
+      } catch (error) {
+        releasePortfolioAsset(asset);
+        throw error;
+      }
+      replacePortfolioFile(asset);
+    } catch (error: any) {
+      if (portfolioMountedRef.current && session === portfolioModalSession.current) {
+        portfolioNotice("Arquivo inválido", error?.message || "Não foi possível selecionar o arquivo.");
+      }
     }
   };
 
   const handleAddPortfolio = async () => {
-    if (!portfolioName.trim() || !portfolioDescription.trim()) {
-      Alert.alert("Campos obrigatórios", "Informe o título e a descrição do trabalho.");
+    if (portfolioSavingRef.current) return;
+    const titulo = portfolioName.trim();
+    const descricao = portfolioDescription.trim();
+    if (!titulo || !descricao) {
+      portfolioNotice("Campos obrigatórios", "Informe o título e a descrição do trabalho.");
       return;
     }
+    portfolioSavingRef.current = true;
+    setIsSavingPortfolio(true);
     try {
       const token = await AsyncStorage.getItem("access_token");
       if (!token) throw new Error("Faça login novamente para salvar seu portfólio.");
-      const response = await fetch(`${URL_API}/api/artistas/portfolio`, {
+      const asset = portfolioFileRef.current;
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+      let body: FormData | string;
+      if (asset) {
+        body = await portfolioFormData(titulo, descricao, asset);
+      } else {
+        headers["Content-Type"] = "application/json";
+        body = JSON.stringify({ titulo, descricao });
+      }
+      const response = await fetch(`${URL_API}/api/artistas/portfolio${asset ? "/arquivo" : ""}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ titulo: portfolioName.trim(), descricao: portfolioDescription.trim() }),
+        headers,
+        body,
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "Não foi possível salvar o item.");
-      setPortfolioItems((current) => [...current, { id: String(result.id), name: result.titulo, description: result.descricao, file: null, isFeatured: false }]);
-      if (portfolioFile) Alert.alert("Item salvo", "Título e descrição foram publicados. O arquivo selecionado ainda não é enviado ao servidor.");
-      closePortfolioModal();
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(portfolioApiError(result, "Não foi possível salvar o item."));
+      if (portfolioMountedRef.current) {
+        portfolioMutationVersion.current += 1;
+        setPortfolioItems((current) => [...current, toPortfolioItem(result)]);
+        portfolioModalSession.current += 1;
+        replacePortfolioFile(null);
+        setPortfolioModalVisible(false);
+      }
     } catch (error: any) {
-      Alert.alert("Erro ao salvar", error?.message || "Não foi possível salvar o item do portfólio.");
+      if (portfolioMountedRef.current) {
+        portfolioNotice("Erro ao salvar", error?.message || "Não foi possível salvar o item do portfólio.");
+      }
+    } finally {
+      portfolioSavingRef.current = false;
+      if (portfolioMountedRef.current) setIsSavingPortfolio(false);
     }
   };
 
   const handleDeletePortfolioItem = async (id: string) => {
+    if (portfolioDeletingRef.current.has(id)) return;
+    portfolioDeletingRef.current.add(id);
+    setDeletingPortfolioIds([...portfolioDeletingRef.current]);
     try {
       const token = await AsyncStorage.getItem("access_token");
       if (!token) throw new Error("Faça login novamente.");
-      const response = await fetch(`${URL_API}/api/artistas/portfolio/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch(`${URL_API}/api/artistas/portfolio/${encodeURIComponent(id)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.detail || "Não foi possível excluir o item.");
-      setPortfolioItems((current) => current.filter((item) => item.id !== id));
+      if (!response.ok) throw new Error(portfolioApiError(result, "Não foi possível excluir o item."));
+      if (portfolioMountedRef.current) {
+        portfolioMutationVersion.current += 1;
+        setPortfolioItems((current) => current.filter((item) => item.id !== id));
+        setVideoItems((current) => current.filter((item) => item.id !== id));
+      }
     } catch (error: any) {
-      Alert.alert("Erro", error?.message || "Não foi possível excluir o item.");
+      if (portfolioMountedRef.current) {
+        portfolioNotice("Erro", error?.message || "Não foi possível excluir o item.");
+      }
+    } finally {
+      portfolioDeletingRef.current.delete(id);
+      if (portfolioMountedRef.current) setDeletingPortfolioIds([...portfolioDeletingRef.current]);
     }
   };
 
@@ -757,61 +895,97 @@ export default function IndexScreen() {
   };
 
   const openVideoModal = () => {
+    if (videoSavingRef.current || portfolioSavingRef.current) return;
+    videoModalSession.current += 1;
     setVideoTitle("");
     setVideoSubtitle("");
-    setVideoFile(null);
-    setVideoCover(null);
+    replaceVideoFile(null);
+    replaceVideoCover(null);
     setVideoModalVisible(true);
   };
 
-  const closeVideoModal = () => setVideoModalVisible(false);
+  const closeVideoModal = () => {
+    if (videoSavingRef.current) return;
+    videoModalSession.current += 1;
+    replaceVideoFile(null);
+    replaceVideoCover(null);
+    setVideoModalVisible(false);
+  };
 
-  const handlePickVideo = async () => {
+  const pickVideoAsset = async (isCover: boolean) => {
+    if (videoSavingRef.current) return;
+    const session = videoModalSession.current;
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: "video/*",
+        type: isCover ? PORTFOLIO_COVER_TYPES : PORTFOLIO_VIDEO_TYPES,
         copyToCacheDirectory: true,
         multiple: false,
+        base64: false,
       });
-      if (!result.canceled && result.assets?.length > 0)
-        setVideoFile(result.assets[0]);
-    } catch (error) {
-      console.error(error);
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      if (!portfolioMountedRef.current || session !== videoModalSession.current || videoSavingRef.current) {
+        releasePortfolioAsset(asset);
+        return;
+      }
+      try {
+        if (isCover) validatePortfolioCover(asset);
+        else validatePortfolioVideo(asset);
+      } catch (error) {
+        releasePortfolioAsset(asset);
+        throw error;
+      }
+      if (isCover) replaceVideoCover(asset);
+      else replaceVideoFile(asset);
+    } catch (error: any) {
+      if (portfolioMountedRef.current && session === videoModalSession.current) {
+        portfolioNotice("Arquivo inválido", error?.message || "Não foi possível selecionar o arquivo.");
+      }
     }
   };
 
-  const handlePickVideoCover = async () => {
+  const handlePickVideo = () => pickVideoAsset(false);
+  const handlePickVideoCover = () => pickVideoAsset(true);
+
+  const handleAddVideo = async () => {
+    if (videoSavingRef.current) return;
+    const titulo = videoTitle.trim();
+    const descricao = videoSubtitle.trim();
+    const asset = videoFileRef.current;
+    if (!titulo || !descricao || !asset) {
+      portfolioNotice("Campos obrigatórios", "Informe o título, a descrição e selecione o vídeo.");
+      return;
+    }
+    videoSavingRef.current = true;
+    setIsSavingVideo(true);
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: "image/*",
-        copyToCacheDirectory: true,
-        multiple: false,
+      const token = await AsyncStorage.getItem("access_token");
+      if (!token) throw new Error("Faça login novamente para salvar seu vídeo.");
+      const body = await portfolioFormData(titulo, descricao, asset, { secao: "video", capa: videoCoverRef.current });
+      const response = await fetch(`${URL_API}/api/artistas/portfolio/arquivo`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body,
       });
-      if (!result.canceled && result.assets?.length > 0)
-        setVideoCover(result.assets[0]);
-    } catch (error) {
-      console.error(error);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(portfolioApiError(result, "Não foi possível salvar o vídeo."));
+      if (portfolioMountedRef.current) {
+        portfolioMutationVersion.current += 1;
+        setVideoItems((current) => [...current, toVideoItem(result)]);
+        videoModalSession.current += 1;
+        replaceVideoFile(null);
+        replaceVideoCover(null);
+        setVideoModalVisible(false);
+      }
+    } catch (error: any) {
+      if (portfolioMountedRef.current) portfolioNotice("Erro ao salvar", error?.message || "Não foi possível salvar o vídeo.");
+    } finally {
+      videoSavingRef.current = false;
+      if (portfolioMountedRef.current) setIsSavingVideo(false);
     }
   };
 
-  const handleAddVideo = () => {
-    if (!videoTitle.trim() || !videoSubtitle.trim() || !videoFile) return;
-    const newVideo: VideoItem = {
-      id: Date.now().toString(),
-      title: videoTitle.trim(),
-      subtitle: videoSubtitle.trim(),
-      file: videoFile,
-      cover: videoCover,
-      type: "music",
-      isFeatured: false,
-    };
-    setVideoItems((current) => [...current, newVideo]);
-    closeVideoModal();
-  };
-
-  const handleDeleteVideoItem = (id: string) => {
-    setVideoItems((current) => current.filter((item) => item.id !== id));
-  };
+  const handleDeleteVideoItem = (id: string) => handleDeletePortfolioItem(id);
 
   const handleToggleFeatureVideo = (id: string) => {
     setVideoItems((current) =>
@@ -1359,7 +1533,7 @@ export default function IndexScreen() {
                         </View>
                       </View>
 
-                      {portfolioItems.length === 0 ? (
+                      {portfolioItems.length === 0 && videoItems.length === 0 ? (
                         <View style={styles.emptyPortfolioCard}>
                           <Music size={24} color={theme.textSecondary} style={{ marginBottom: 6 }} />
                           <Text style={styles.emptyPortfolioText}>Ainda não há nada no portfólio.</Text>
@@ -1398,16 +1572,17 @@ export default function IndexScreen() {
                                       position: "relative",
                                     }}
                                     activeOpacity={0.85}
+                                    accessibilityLabel={`Abrir ${isVideo ? "vídeo" : "imagem"} ${item.name}`}
                                     onPress={() =>
                                       openViewer(
-                                        item.file.uri,
+                                        item.file?.uri || "",
                                         isVideo ? "video" : "image",
                                       )
                                     }
                                   >
                                     {isImage ? (
                                       <Image
-                                        source={{ uri: item.file.uri }}
+                                        source={{ uri: item.file?.uri }}
                                         style={styles.fullCoverImage}
                                       />
                                     ) : (
@@ -1446,7 +1621,12 @@ export default function IndexScreen() {
                                   {item.description}
                                 </Text>
                                 {item.file?.name && !isImage && !isVideo && (
-                                  <Text style={styles.portfolioFileName}>
+                                  <Text
+                                    style={styles.portfolioFileName}
+                                    accessibilityRole="link"
+                                    accessibilityLabel={`Abrir ${item.file.name}`}
+                                    onPress={() => openPortfolioFile(item.file?.uri || "")}
+                                  >
                                     📎 {item.file.name}
                                   </Text>
                                 )}
@@ -1490,6 +1670,8 @@ export default function IndexScreen() {
                                 <TouchableOpacity
                                   style={[styles.cardActionBtn, styles.cardActionDelete]}
                                   onPress={() => handleDeletePortfolioItem(item.id)}
+                                  disabled={deletingPortfolioIds.includes(item.id)}
+                                  accessibilityLabel={`Excluir ${item.name}`}
                                 >
                                   <Trash2 size={14} color="#E05A10" />
                                 </TouchableOpacity>
@@ -1566,6 +1748,8 @@ export default function IndexScreen() {
                                     styles.cardActionDelete,
                                   ]}
                                   onPress={() => handleDeleteVideoItem(video.id)}
+                                  disabled={deletingPortfolioIds.includes(video.id)}
+                                  accessibilityLabel={`Excluir vídeo ${video.title}`}
                                 >
                                   <Trash2 size={13} color="#E05A10" />
                                 </TouchableOpacity>
@@ -1574,6 +1758,7 @@ export default function IndexScreen() {
                               <TouchableOpacity
                                 style={styles.videoThumbnail}
                                 activeOpacity={0.85}
+                                accessibilityLabel={`Abrir vídeo ${video.title}`}
                                 onPress={() => {
                                   if (video.file?.uri)
                                     openViewer(video.file.uri, "video");
@@ -2141,6 +2326,7 @@ export default function IndexScreen() {
               <TouchableOpacity
                 style={styles.modalCloseButton}
                 onPress={closePortfolioModal}
+                disabled={isSavingPortfolio}
               >
                 <X size={19} color={theme.textSecondary} />
               </TouchableOpacity>
@@ -2151,6 +2337,8 @@ export default function IndexScreen() {
                 <TextInput
                   value={portfolioName}
                   onChangeText={setPortfolioName}
+                  editable={!isSavingPortfolio}
+                  maxLength={150}
                   placeholder="Ex.: Apresentação acústica"
                   placeholderTextColor={theme.textSecondary}
                   style={styles.formInput}
@@ -2161,6 +2349,7 @@ export default function IndexScreen() {
                 <TextInput
                   value={portfolioDescription}
                   onChangeText={setPortfolioDescription}
+                  editable={!isSavingPortfolio}
                   placeholder="Descreva seu trabalho..."
                   placeholderTextColor={theme.textSecondary}
                   multiline
@@ -2174,7 +2363,7 @@ export default function IndexScreen() {
               </View>
               <View style={styles.formGroup}>
                 <Text style={styles.inputLabel}>
-                  Arquivo (Imagens e Vídeos)
+                  Arquivo (Imagens, Vídeos e PDF)
                 </Text>
                 <TouchableOpacity
                   style={[
@@ -2182,6 +2371,7 @@ export default function IndexScreen() {
                     portfolioFile && styles.uploadButtonSelected,
                   ]}
                   onPress={handlePickFile}
+                  disabled={isSavingPortfolio}
                 >
                   <View style={styles.uploadIconContainer}>
                     <Upload size={18} color={theme.accent} />
@@ -2195,7 +2385,7 @@ export default function IndexScreen() {
                     <Text style={styles.uploadSubtitle}>
                       {portfolioFile
                         ? portfolioFile.name
-                        : "Clique para selecionar um arquivo"}
+                        : "Clique para selecionar um arquivo (até 50 MB)"}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -2205,19 +2395,20 @@ export default function IndexScreen() {
               <TouchableOpacity
                 style={styles.modalCancelButton}
                 onPress={closePortfolioModal}
+                disabled={isSavingPortfolio}
               >
                 <Text style={styles.modalCancelText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
                   styles.modalAddButton,
-                  (!portfolioName.trim() || !portfolioDescription.trim()) &&
+                  (isSavingPortfolio || !portfolioName.trim() || !portfolioDescription.trim()) &&
                     styles.modalAddButtonDisabled,
                 ]}
                 onPress={handleAddPortfolio}
-                disabled={!portfolioName.trim() || !portfolioDescription.trim()}
+                disabled={isSavingPortfolio || !portfolioName.trim() || !portfolioDescription.trim()}
               >
-                <Text style={styles.modalAddText}>Adicionar</Text>
+                <Text style={styles.modalAddText}>{isSavingPortfolio ? "Enviando..." : "Adicionar"}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2242,6 +2433,7 @@ export default function IndexScreen() {
               <TouchableOpacity
                 style={styles.modalCloseButton}
                 onPress={closeVideoModal}
+                disabled={isSavingVideo}
               >
                 <X size={19} color={theme.textSecondary} />
               </TouchableOpacity>
@@ -2255,6 +2447,8 @@ export default function IndexScreen() {
                 <TextInput
                   value={videoTitle}
                   onChangeText={setVideoTitle}
+                  editable={!isSavingVideo}
+                  maxLength={150}
                   placeholder="Ex.: Apresentação acústica"
                   placeholderTextColor={theme.textSecondary}
                   style={styles.formInput}
@@ -2265,6 +2459,8 @@ export default function IndexScreen() {
                 <TextInput
                   value={videoSubtitle}
                   onChangeText={setVideoSubtitle}
+                  editable={!isSavingVideo}
+                  maxLength={300}
                   placeholder="Ex.: Violão e voz"
                   placeholderTextColor={theme.textSecondary}
                   style={styles.formInput}
@@ -2278,6 +2474,7 @@ export default function IndexScreen() {
                     videoCover && styles.uploadButtonSelected,
                   ]}
                   onPress={handlePickVideoCover}
+                  disabled={isSavingVideo}
                 >
                   <View style={styles.uploadIconContainer}>
                     <ImageIcon size={18} color={theme.accent} />
@@ -2289,7 +2486,7 @@ export default function IndexScreen() {
                     <Text style={styles.uploadSubtitle}>
                       {videoCover
                         ? videoCover.name
-                        : "Escolha uma miniatura para o vídeo"}
+                        : "Escolha uma miniatura (até 10 MB)"}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -2302,6 +2499,7 @@ export default function IndexScreen() {
                     videoFile && styles.uploadButtonSelected,
                   ]}
                   onPress={handlePickVideo}
+                  disabled={isSavingVideo}
                 >
                   <View style={styles.uploadIconContainer}>
                     <Upload size={18} color={theme.accent} />
@@ -2313,7 +2511,7 @@ export default function IndexScreen() {
                     <Text style={styles.uploadSubtitle}>
                       {videoFile
                         ? videoFile.name
-                        : "Clique para selecionar o vídeo"}
+                        : "Selecione um vídeo (até 50 MB)"}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -2323,21 +2521,22 @@ export default function IndexScreen() {
               <TouchableOpacity
                 style={styles.modalCancelButton}
                 onPress={closeVideoModal}
+                disabled={isSavingVideo}
               >
                 <Text style={styles.modalCancelText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
                   styles.modalAddButton,
-                  (!videoTitle.trim() || !videoSubtitle.trim() || !videoFile) &&
+                  (isSavingVideo || !videoTitle.trim() || !videoSubtitle.trim() || !videoFile) &&
                     styles.modalAddButtonDisabled,
                 ]}
                 onPress={handleAddVideo}
                 disabled={
-                  !videoTitle.trim() || !videoSubtitle.trim() || !videoFile
+                  isSavingVideo || !videoTitle.trim() || !videoSubtitle.trim() || !videoFile
                 }
               >
-                <Text style={styles.modalAddText}>Adicionar</Text>
+                <Text style={styles.modalAddText}>{isSavingVideo ? "Enviando..." : "Adicionar"}</Text>
               </TouchableOpacity>
             </View>
           </View>

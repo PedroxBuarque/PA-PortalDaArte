@@ -1,0 +1,14 @@
+# Credenciais locais de qualquer componente. Envie apenas os exemplos.
+.env
+.env.*
+!.env.example
+
+# Dependencias e arquivos gerados sao recriados localmente.
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.expo/
+dist/
+web-build/

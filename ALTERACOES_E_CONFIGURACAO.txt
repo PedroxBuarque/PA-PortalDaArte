@@ -1,0 +1,365 @@
+PORTAL DA ARTE — RECUPERAÇÃO DE SENHA POR E-MAIL
+Entrega: 03/11/2026
+
+1. OBJETIVO E RESULTADO
+
+Foi completado o fluxo de recuperação de senha já iniciado no projeto:
+solicitar o link, receber o e-mail, abrir a tela de nova senha, confirmar a
+alteração e entrar com a nova credencial.
+
+A tela inicial de login e a tela existente de solicitação do link mantêm os
+mesmos estilos. A nova etapa de redefinição usa o mesmo cartão, fundo, campos,
+botões e estilos já presentes no arquivo login.tsx. O objeto StyleSheet.create
+foi preservado integralmente. A organização das pastas, os caminhos das rotas,
+as versões das dependências e o schema do banco foram preservados.
+
+A entrega contém uma implementação SMTP real. Para receber mensagens em uma
+caixa postal externa, é necessário preencher as credenciais SMTP e as URLs do
+ambiente. Nenhuma credencial real foi inventada ou incluída nesta alteração.
+
+2. DIAGNÓSTICO DO PROBLEMA ORIGINAL
+
+O frontend já fazia POST /api/recuperar-senha e informava que enviaria um link.
+Entretanto, a função recuperar_senha do backend apenas consultava o cadastro,
+registrava uma mensagem no terminal e retornava sucesso. Não existiam geração
+ou persistência de tokens, conexão SMTP, endpoint de redefinição nem formulário
+para gravar a nova senha.
+
+O BD.sql já contém usuarios, tokens_usuario e sessoes. A tabela tokens_usuario
+já possui usuario_id, tipo, hash_token, expira_em, usado_em e criado_em, incluindo
+o tipo redefinicao_senha. Essa estrutura foi reutilizada; não há migração SQL.
+
+3. ARQUIVOS ALTERADOS — COMO E POR QUÊ
+
+3.1 python-api/main.py
+
+A. Imports de bibliotecas padrão e recursos já disponíveis
+Foram acrescentados secrets, hashlib, hmac, smtplib, ssl, EmailMessage,
+utilitários de URL, logging, html, re, threading, time e deque, além de
+BackgroundTasks e Request do FastAPI. Eles implementam geração de segredo,
+hash, envio autenticado com TLS, composição do e-mail, validações e controle
+de solicitações. Não foi adicionada dependência de execução ao requirements.txt.
+
+B. Modelos de entrada
+RecuperarSenhaRequest passou a limitar o tamanho do e-mail, e a rota valida
+seu formato e normaliza espaços externos e caixa. Foi criado
+RedefinirSenhaRequest, com token e nova_senha, para representar a conclusão
+do fluxo. A validação também ocorre no servidor, mesmo que o cliente a ignore.
+
+C. carregar_config_recuperacao
+Lê e valida as variáveis SMTP e PASSWORD_RESET_URL. Exige SMTP autenticado com
+STARTTLS ou SSL, timeout de 1 a 60 segundos, remetente e URL válidos. URL HTTP
+é aceita somente para localhost, 127.0.0.1 e ::1; o endereço público exige HTTPS.
+O domínio do link vem da configuração, e não do cabeçalho Host da requisição.
+Configuração incompleta ou inválida produz HTTP 503 antes de pesquisar a conta.
+
+D. limitar_recuperacao_por_ip
+Limita a dez solicitações em quinze minutos por IP. O mapa é limitado e possui
+limpeza de registros expirados. Esse controle reside na memória do processo;
+em múltiplos workers, o proxy/API gateway deve aplicar um limite compartilhado.
+O código usa o IP fornecido pelo servidor ASGI e não lê X-Forwarded-For
+diretamente. Configure o proxy de confiança do Uvicorn conforme a implantação.
+
+E. enviar_email_recuperacao
+Monta mensagem em texto simples e HTML, com link para a URL configurada e
+validade informada. Os valores inseridos no HTML são escapados. Usa smtplib
+com autenticação, timeout e verificação do certificado TLS. STARTTLS ocorre
+antes do login SMTP; SSL protege a conexão desde sua abertura. A senha do
+usuário nunca é enviada por e-mail.
+
+F. processar_recuperacao_senha
+Pesquisa apenas contas ativas ou pendentes de verificação e bloqueia a linha
+do usuário durante a decisão de emitir o token. Aplica limites compartilhados
+pelo banco: intervalo de sessenta segundos e até cinco links por hora/conta.
+Gera secrets.token_urlsafe(32), guarda somente seu SHA-256 e define validade de
+trinta minutos usando UTC no MySQL. O token original é usado exclusivamente
+para compor o link do e-mail.
+
+A gravação do token é confirmada antes do envio SMTP. Se o envio falhar, o
+código tenta remover apenas o token recém-criado. Links anteriores continuam
+válidos até expirar ou até uma redefinição bem-sucedida. Assim, outra pessoa
+não consegue cancelar imediatamente um link já recebido apenas solicitando
+uma nova recuperação. Os logs dessa rotina contêm a categoria do erro, sem
+endereço de e-mail, token, senha ou detalhes das credenciais.
+
+G. POST /api/recuperar-senha
+Substitui a simulação anterior. Valida entrada/configuração, aplica o limite
+por IP e agenda o processamento com BackgroundTasks. A mensagem e o status
+públicos são iguais para e-mail existente ou inexistente. O trabalho com banco
+e SMTP ocorre após a resposta, reduzindo a diferença de tempo observável entre
+esses casos. A resposta confirma recebimento da solicitação, não entrega na
+caixa postal.
+
+H. POST /api/redefinir-senha
+Novo endpoint para receber token e nova_senha. Rejeita token malformado,
+inexistente, expirado, usado, de outro propósito ou associado a conta inelegível.
+
+A senha exige pelo menos oito caracteres, até 72 bytes em UTF-8 e não pode ser
+composta somente de espaços. Espaços significativos são preservados. O limite
+em bytes evita truncamento silencioso pelo bcrypt já adotado no projeto.
+
+Em uma única transação, a rotina bloqueia o usuário e depois o token, valida
+as condições, grava o novo hash bcrypt, marca os tokens pendentes da conta
+como usados e marca suas sessões registradas como revogadas. Um erro antes
+do commit reverte as alterações. A ordem dos bloqueios é a mesma na emissão
+e no consumo. Duas requisições não podem consumir com sucesso o mesmo token.
+
+I. JWTs: versao_senha, criar_access_token, criar_refresh_token,
+   get_usuario_atual, login e refresh_token
+Os JWTs access e refresh recebem a claim pwdv, calculada por HMAC-SHA256 com
+o segredo do servidor e o hash bcrypt atual. O hash bcrypt não é exposto no
+JWT. Na autenticação/renovação, a versão é comparada com a credencial atual no
+banco usando compare_digest. A troca da senha invalida os tokens anteriores.
+
+Esse ajuste é necessário porque os JWTs originais eram independentes da senha
+e não consultavam a tabela sessoes: somente marcar sessões como revogadas
+não impediria o uso dos JWTs antigos. Nenhuma coluna nova foi necessária.
+No login, a alteração consiste em passar o hash atual aos emissores de JWT.
+
+A verificação de acesso também consulta o estado atual da conta. Ativo e
+pendente_verificacao são aceitos; contas bloqueadas, suspensas ou excluídas
+não mantêm acesso por token antigo. O refresh conserva a exigência anterior
+de conta ativa. O tratamento de HTTPException e a liberação de conexão em
+refresh_token foram corrigidos para preservar HTTP 401 em recusas de sessão.
+
+Consequências de implantação: JWTs emitidos pela versão anterior, sem pwdv,
+exigirão novo login. Cada validação de access token passa a consultar o banco.
+Mantenha SECRET_KEY consistente entre os processos da API.
+
+3.2 PA-PortalDaArte/src/app/pages/login/login.tsx
+
+A. Reconhecimento do link
+useLocalSearchParams lê token na rota pública já existente
+/pages/login/login. A captura é feita após a montagem da tela, mantendo o
+primeiro render compatível com o HTML exportado pelo Expo e evitando erro
+de hidratação ao abrir o link diretamente. Ao capturá-lo, a tela o mantém em memória e remove o
+parâmetro da URL com router.setParams. Foram acrescentadas política no-referrer
+no documento web e nas requisições de recuperação/redefinição. Recarregar a
+página após essa limpeza exige abrir novamente o link recebido por e-mail.
+
+B. Nova etapa funcional na mesma tela
+Foram acrescentados os campos Nova senha e Confirmar nova senha e a ação
+Redefinir senha. São reutilizados exclusivamente estilos existentes. A
+confirmação deve corresponder à senha; tamanho mínimo e limite UTF-8 são
+verificados antes do POST /api/redefinir-senha. O backend repete as validações
+que protegem a credencial. A confirmação é uma proteção de digitação no cliente.
+
+C. Estados e feedback
+Há estados de envio, bloqueio de múltiplos cliques, timeout de 25 segundos,
+cancelamento de requisições ao abandonar/trocar o fluxo e prevenção de respostas
+antigas sobrescreverem uma nova etapa. Mensagens FastAPI 422 são convertidas em
+texto seguro mesmo quando detail vem como uma lista, evitando erro de render.
+
+D. Conclusão e links inválidos
+Após sucesso, token e campos de senha são limpos e o usuário retorna ao login
+com a mensagem de confirmação. Não há autenticação automática. Um token
+inválido, expirado ou usado oferece Solicitar novo link. A navegação de login,
+o destino redirect já sanitizado e o guard de rotas públicas foram preservados.
+O AuthGate já permitia a rota de login, inclusive para usuários com sessão.
+
+3.3 Arquivos acrescentados
+
+- python-api/.env.example: exemplo comentado de banco, segredo JWT, SMTP e URL
+  do frontend, para tornar a configuração reproduzível sem incluir credenciais.
+- python-api/test_recuperacao_senha.py: testes de comportamento do fluxo e das
+  proteções, executados sem banco de produção ou envio externo.
+- ALTERACOES_E_CONFIGURACAO.txt: este relatório de implementação, uso e validação.
+
+4. CONTRATOS DA API
+
+Solicitação:
+POST /api/recuperar-senha
+Content-Type: application/json
+{"email":"pessoa@exemplo.com"}
+
+Sucesso: HTTP 200, com status="sucesso" e mensagem condicional de envio.
+E-mail inválido: HTTP 422.
+Excesso de solicitações por IP: HTTP 429.
+Configuração ausente/inválida: HTTP 503.
+O limite por conta mantém a mesma resposta neutra e suprime o novo envio.
+
+Conclusão:
+POST /api/redefinir-senha
+Content-Type: application/json
+{"token":"TOKEN_RECEBIDO_NO_LINK","nova_senha":"NovaSenhaEscolhida"}
+
+Sucesso: HTTP 200, status="sucesso" e mensagem para entrar com a nova senha.
+Link inválido/expirado/usado ou conta inelegível: HTTP 400.
+Senha inválida ou corpo inválido: HTTP 422.
+Falha durante a atualização: HTTP 500 com mensagem genérica.
+
+5. COMO CONFIGURAR E EXECUTAR
+
+5.1 Backend
+
+A partir da pasta raiz PA-PortalDaArte, instale o requirements.txt existente
+em seu ambiente Python. Exemplo para PowerShell/Windows:
+
+    py -m venv .venv
+    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+    cd python-api
+    if (!(Test-Path .env)) { Copy-Item .env.example .env }
+
+Preencha o .env. Se o arquivo já existe, acrescente as variáveis novas e
+preserve os valores que já correspondem ao seu ambiente. Configure:
+
+    DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
+    SECRET_KEY
+    SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+    SMTP_FROM_EMAIL, SMTP_FROM_NAME
+    SMTP_SECURITY, SMTP_TIMEOUT_SECONDS
+    PASSWORD_RESET_URL
+
+Use as credenciais SMTP do provedor escolhido. Alguns provedores exigem senha
+de aplicativo ou credencial específica. O remetente deve ser autorizado por
+esse provedor. Use um SECRET_KEY longo e aleatório; o valor do exemplo deve
+ser substituído. Gere um valor, se necessário, com:
+
+    python -c "import secrets; print(secrets.token_urlsafe(48))"
+
+Mantenha o arquivo com credenciais no ambiente de execução. Não o distribua
+junto ao projeto. Os placeholders do exemplo não são credenciais válidas.
+
+Exemplo de desenvolvimento local:
+
+    SMTP_SECURITY=starttls
+    SMTP_PORT=587
+    PASSWORD_RESET_URL=http://localhost:8081/pages/login/login
+
+Para SMTP SSL, use SMTP_SECURITY=ssl e a porta indicada pelo provedor,
+normalmente 465. STARTTLS normalmente utiliza 587. Host, conta, senha e
+remetente continuam sendo os valores fornecidos pelo seu provedor.
+
+Inicie a API a partir de python-api:
+
+    ..\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+
+No Linux/macOS, use python3 -m venv .venv e os executáveis em .venv/bin.
+
+5.2 Frontend
+
+Em outro terminal, abra a pasta interna PA-PortalDaArte, que contém package.json.
+O arquivo completo mantém as dependências incluídas no material original.
+Se precisar reinstalá-las em seu ambiente, use npm ci com o package-lock.json
+existente. Inicie com:
+
+    npm run web
+
+Confira a URL exibida pelo Expo. PASSWORD_RESET_URL deve apontar para essa
+origem e para /pages/login/login. EXPO_PUBLIC_API_URL, no frontend, deve apontar
+para a API acessível pelo navegador. Reinicie o Expo ao mudar essa variável.
+
+Para implantação, substitua localhost pelo domínio HTTPS real do frontend e
+use uma API acessível por HTTPS. A hospedagem precisa permitir acesso direto
+à rota /pages/login/login. Um link localhost aberto em outro dispositivo aponta
+para esse outro dispositivo; por isso ele serve somente ao desenvolvimento
+na máquina que está executando a aplicação.
+
+5.3 Banco de dados
+
+BD.sql foi preservado integralmente. Se o banco fornecido já está importado,
+não é necessário executar SQL adicional. Para uma instalação nova, importe
+o arquivo somente no banco destinado à nova instalação e configure a API.
+Não reimporte o dump sobre um banco existente para aplicar esta funcionalidade;
+o código passa a utilizar as tabelas já presentes.
+
+5.4 Uso pelo usuário
+
+1. Abra o login e clique em Esqueceu a senha?.
+2. Informe o e-mail do cadastro e envie a solicitação.
+3. Abra o link recebido no e-mail antes de trinta minutos.
+4. Preencha e confirme a nova senha.
+5. Entre com a nova senha. O link já utilizado e as sessões anteriores deixam
+   de ser válidos.
+
+Se o link expirar ou já tiver sido utilizado, use Solicitar novo link. Se
+ainda não receber o e-mail, confira a configuração e os registros sanitizados
+da API e do provedor. A aplicação retorna uma mensagem condicional para
+proteger a existência do cadastro.
+
+6. TESTES E LIMITES DA VALIDAÇÃO
+
+Resultados obtidos nesta entrega:
+
+- 20 de 20 testes automatizados do backend passaram com as versões exatas
+  do requirements.txt original e httpx 0.28.1 para o cliente de testes.
+- 18 verificações de integração passaram em uma instância descartável de
+  MySQL 8.0.46, criada somente com as definições originais das três tabelas
+  utilizadas e registros sintéticos. Incluíram armazenamento do hash,
+  expiração UTC, alteração de senha, rejeição da senha antiga e revogação JWT.
+- Envios SMTP foram capturados por servidores locais de teste tanto em SSL
+  quanto em STARTTLS, com autenticação e verificação de certificado. Nenhum
+  e-mail externo foi enviado; credenciais de um provedor real ainda precisam
+  ser configuradas no ambiente de uso.
+- Concorrência real no MySQL: duas tentativas simultâneas de consumir o mesmo
+  token resultaram em exatamente um HTTP 200 e um HTTP 400. Quatro solicitações
+  simultâneas da mesma conta produziram somente um novo e-mail.
+- 13 verificações do frontend passaram no Chromium sobre o export web do Expo,
+  com API interceptada. Abrangeram remoção do token da URL, validação de senha,
+  confirmação, erros 422, múltiplos cliques, retorno ao login, links inválidos
+  e troca de link enquanto a tela permanece aberta. Não houve exceções de
+  execução nem erro de hidratação no teste final.
+- Comparação de screenshots: login original versus entregue e solicitação de
+  recuperação original versus entregue tiveram zero pixels diferentes nas
+  capturas desktop de 1360 x 1000. O StyleSheet também é idêntico em bytes.
+- A nova etapa também foi verificada em viewport mobile de 375 x 812: os
+  campos e o botão ficaram acessíveis e não houve erro de execução.
+- O export web do Expo foi concluído com as mesmas treze rotas do original.
+- A verificação TypeScript encontrou os mesmos 43 diagnósticos já existentes
+  no projeto original e nenhum diagnóstico novo após normalizar os números
+  de linha. A checagem global de tipos, portanto, não está completamente
+  limpa; essas pendências anteriores não foram alteradas nesta entrega.
+- A sintaxe Python foi compilada com sucesso.
+
+A comparação dos arquivos originais confirmou alterações de conteúdo somente
+em main.py e login.tsx. BD.sql, dependências, assets e demais arquivos originais
+permanecem preservados. Os arquivos novos são os três descritos na seção 3.3.
+
+Aplicativos nativos Android/iOS e a entrega a uma caixa postal externa não
+foram validados. Os testes de navegador usam o frontend web exportado, e a
+integração com SQL/SMTP foi executada separadamente com a API real.
+
+Os testes unitários usam um SQLite temporário com um pequeno adaptador do
+dialeto SQL e SMTP simulado. Eles não usam o banco enviado com dados pessoais.
+Para executá-los, instale também httpx (dependência apenas de testes) e, na
+pasta python-api, execute:
+
+    python -m pip install httpx==0.28.1
+    python -m unittest -v test_recuperacao_senha.py
+
+Não foi alterado requirements.txt para incorporar ferramentas de validação.
+O próprio arquivo de testes explica a limitação do adaptador SQLite em
+relação aos bloqueios concorrentes do MySQL.
+
+7. OBSERVAÇÕES DE OPERAÇÃO
+
+BackgroundTasks executa o envio após a resposta HTTP, dentro do processo da
+API. Não é uma fila persistente: se o processo for interrompido antes do fim,
+um envio pendente pode ser perdido. A existência de um token no banco e uma
+resposta HTTP de sucesso não são recibos de entrega à caixa postal. A aceitação
+SMTP, filtros de spam e políticas do provedor também participam da entrega.
+
+O controle por conta usa o banco e é compartilhado entre processos. O controle
+por IP é local ao processo e deve ser complementado na infraestrutura quando
+houver múltiplos workers. Nenhuma infraestrutura nova foi adicionada para
+preservar a organização atual do projeto.
+
+A troca de senha preserva o estado cadastral da conta. Ela não reativa contas
+bloqueadas, suspensas ou excluídas e não verifica automaticamente o e-mail de
+uma conta pendente. Ao implantar, usuários com JWTs antigos precisarão entrar
+novamente devido à nova verificação de versão da credencial.
+
+8. REFERÊNCIAS TÉCNICAS
+
+OWASP — Forgot Password Cheat Sheet:
+https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html
+
+Python — smtplib (TLS, autenticação e envio de mensagens):
+https://docs.python.org/3/library/smtplib.html
+
+Expo Router — parâmetros de URL:
+https://docs.expo.dev/router/reference/url-parameters/
+
+As referências orientam os controles do fluxo. Os detalhes de implementação,
+os caminhos de arquivos e os resultados de testes acima foram obtidos da
+análise e da execução do projeto entregue.

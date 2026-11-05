@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -13,12 +13,15 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { ArrowLeft, MapPin, MessageCircle, Music, Star, X } from "lucide-react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { ArrowLeft, FileText, MapPin, MessageCircle, Music, Star, X } from "lucide-react-native";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { ResizeMode, Video } from "expo-av";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Header from "../../../components/Header";
 import Sidebar from "../../../components/Sidebar";
 import { useTheme } from "../../../components/context/ThemeContext";
+import { openPortfolioFile, portfolioCoverFromApi, portfolioFileFromApi } from "../../../services/portfolio";
+import type { PortfolioFile } from "../../../services/portfolio";
 
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -44,11 +47,34 @@ export default function PerfilPublicoScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [portfolio, setPortfolio] = useState<any[]>([]);
+  const [portfolioWidth, setPortfolioWidth] = useState(0);
   const [selectedService, setSelectedService] = useState<any | null>(null);
   const [isServiceModalVisible, setIsServiceModalVisible] = useState(false);
+  const [viewerFile, setViewerFile] = useState<PortfolioFile | null>(null);
+  const [viewerError, setViewerError] = useState(false);
+
+  const closeViewer = useCallback(() => {
+    // Desmontar a mídia também interrompe a reprodução do vídeo.
+    setViewerFile(null);
+    setViewerError(false);
+  }, []);
+
+  useFocusEffect(useCallback(() => closeViewer, [closeViewer]));
+
+  const openPortfolioItem = (file: PortfolioFile) => {
+    if (file.mimeType.startsWith("image/") || file.mimeType.startsWith("video/")) {
+      setViewerError(false);
+      setViewerFile(file);
+      return;
+    }
+    // PDFs mantêm a mesma abertura externa usada no perfil próprio.
+    openPortfolioFile(file.uri);
+  };
 
   useEffect(() => {
     let active = true;
+    closeViewer();
+    setPortfolio([]);
     const load = async () => {
       try {
         setLoading(true);
@@ -81,7 +107,7 @@ export default function PerfilPublicoScreen() {
       setLoading(false);
     }
     return () => { active = false; };
-  }, [artistId]);
+  }, [artistId, closeViewer]);
 
   const handleSendMessage = async () => {
     try {
@@ -114,6 +140,10 @@ export default function PerfilPublicoScreen() {
   const mode = String(firstValue(artist?.modalidade_atendimento, artist?.modalidade, ""));
   const serviceList = Array.isArray(services) ? services : (services ? [services] : []);
   const categoryList = Array.isArray(categories) ? categories : (categories ? [categories] : []);
+  // Mantém a mesma divisão entre trabalhos e vídeos usada no perfil próprio.
+  const portfolioItems = portfolio.filter((item) => item.secao !== "video");
+  const videoItems = portfolio.filter((item) => item.secao === "video");
+  const isCompactPortfolio = portfolioWidth > 0 && portfolioWidth < 460;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -266,24 +296,177 @@ export default function PerfilPublicoScreen() {
                   </View>
                 </Modal>
 
-                <View style={styles.sectionCard}>
-                  <Text style={styles.sectionTitle}>Portfólio</Text>
-                  {portfolio.length ? portfolio.map((item: any, index: number) => (
-                    <View key={`${item.portfolio_id || item.id}-${index}`} style={styles.portfolioItem}>
-                      <View style={styles.portfolioIcon}><Music size={18} color={theme.accent} /></View>
-                      <View style={{ flex: 1, gap: 5 }}>
-                        <Text style={styles.serviceTitle}>{asText(firstValue(item.titulo, item.name, "Trabalho artístico"))}</Text>
-                        {item.descricao ? <Text style={styles.serviceDescription}>{asText(item.descricao)}</Text> : null}
-                        {item.midia_url && !String(item.midia_url).startsWith("texto://") ? <Text style={styles.portfolioMediaText}>Mídia: {asText(item.midia_url)}</Text> : null}
-                      </View>
+                <View
+                  style={styles.portfolioSection}
+                  onLayout={({ nativeEvent }) => setPortfolioWidth(nativeEvent.layout.width)}
+                >
+                  <View style={styles.portfolioSectionHeader}>
+                    <View>
+                      <Text style={styles.portfolioSectionTitle}>Portfólio</Text>
+                      <Text style={styles.portfolioSectionSubtitle}>Trabalhos e apresentações</Text>
                     </View>
-                  )) : <Text style={styles.bodyText}>Este artista ainda não publicou trabalhos no portfólio.</Text>}
+                  </View>
+
+                  {portfolio.length === 0 ? (
+                    <View style={styles.emptyPortfolioCard}>
+                      <Music size={24} color={theme.textSecondary} style={{ marginBottom: 6 }} />
+                      <Text style={styles.emptyPortfolioText}>Este artista ainda não publicou trabalhos no portfólio.</Text>
+                    </View>
+                  ) : null}
+
+                  {portfolioItems.map((item: any, index: number) => {
+                    const file = portfolioFileFromApi(item);
+                    const title = asText(firstValue(item.titulo, item.name, "Trabalho artístico"));
+                    const isImage = file?.mimeType.startsWith("image/");
+                    const isVideo = file?.mimeType.startsWith("video/");
+                    const isPdf = file?.mimeType === "application/pdf";
+                    const PreviewIcon = isPdf ? FileText : Music;
+                    const preview = (
+                      <View style={[
+                        styles.portfolioPreview,
+                        isVideo && styles.portfolioVideoPreview,
+                        isCompactPortfolio && styles.portfolioPreviewCompact,
+                      ]}>
+                        {isImage && file ? (
+                          <Image source={{ uri: file.uri }} style={[styles.fullCoverImage, styles.coverOverlay]} accessible={false} />
+                        ) : isVideo ? (
+                          <Text style={styles.portfolioVideoPlay}>▶</Text>
+                        ) : (
+                          <>
+                            <PreviewIcon size={38} color={theme.accent} />
+                            <Text style={styles.portfolioPreviewTitle}>{file ? (isPdf ? "PDF" : "Arquivo") : "Portfólio"}</Text>
+                            <Text style={styles.portfolioPreviewText}>{file ? "Documento" : "Trabalho"}</Text>
+                          </>
+                        )}
+                      </View>
+                    );
+                    return (
+                      <View
+                        key={`${item.portfolio_id || item.id}-${index}`}
+                        style={[styles.portfolioCard, isCompactPortfolio && styles.portfolioCardCompact]}
+                      >
+                        {file ? (
+                          <TouchableOpacity
+                            style={[styles.portfolioPreviewButton, isCompactPortfolio && styles.portfolioPreviewButtonCompact]}
+                            activeOpacity={0.85}
+                            accessibilityRole="button"
+                            accessibilityLabel={isImage || isVideo ? `Abrir ${file.name}` : `Abrir documento ${title}`}
+                            onPress={() => openPortfolioItem(file)}
+                          >
+                            {preview}
+                          </TouchableOpacity>
+                        ) : preview}
+                        <View style={styles.portfolioInfo}>
+                          <Text style={styles.portfolioTitle}>{title}</Text>
+                          {item.descricao ? <Text style={styles.portfolioDescription}>{asText(item.descricao)}</Text> : null}
+                          {file && !isImage && !isVideo ? (
+                            <TouchableOpacity
+                              activeOpacity={0.85}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Abrir ${file.name}`}
+                              onPress={() => openPortfolioItem(file)}
+                            >
+                              <Text style={styles.portfolioFileName} numberOfLines={1}>📎 {file.name}</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  })}
+
+                  {videoItems.length > 0 ? (
+                    <View style={styles.videoGrid}>
+                      {videoItems.map((item: any, index: number) => {
+                        const file = portfolioFileFromApi(item);
+                        const cover = portfolioCoverFromApi(item);
+                        const title = asText(firstValue(item.titulo, item.name, "Vídeo do artista"));
+                        const thumbnail = (
+                          <>
+                            {cover ? (
+                              <Image source={{ uri: cover.uri }} style={[styles.fullCoverImage, styles.coverOverlay]} accessible={false} />
+                            ) : <View style={styles.videoIconCircle}><Music size={25} color="#FFFFFF" /></View>}
+                            {file ? <View style={styles.playButton}><Text style={styles.playText}>▶</Text></View> : null}
+                          </>
+                        );
+                        return (
+                          <View
+                            key={`${item.portfolio_id || item.id}-${index}`}
+                            style={[styles.videoCard, isCompactPortfolio && styles.videoCardCompact]}
+                          >
+                            {file ? (
+                              <TouchableOpacity
+                                style={styles.videoThumbnail}
+                                activeOpacity={0.85}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Abrir ${file.name}`}
+                                onPress={() => openPortfolioItem(file)}
+                              >
+                                {thumbnail}
+                              </TouchableOpacity>
+                            ) : <View style={styles.videoThumbnail}>{thumbnail}</View>}
+                            <View style={styles.videoInfo}>
+                              <Text style={styles.videoTitle}>{title}</Text>
+                              {item.descricao ? <Text style={styles.videoSubtitle}>{asText(item.descricao)}</Text> : null}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : null}
                 </View>
               </>
             ) : null}
           </ScrollView>
         </View>
       </View>
+      <Modal
+        visible={viewerFile !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeViewer}
+      >
+        <View style={styles.viewerOverlay}>
+          <TouchableOpacity
+            style={styles.viewerCloseButton}
+            onPress={closeViewer}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Fechar visualização"
+          >
+            <X size={26} color="#FFFFFF" />
+          </TouchableOpacity>
+          {viewerFile && (viewerError ? (
+            <View style={styles.viewerErrorBox}>
+              <Text style={styles.viewerErrorText}>Não foi possível carregar este arquivo no visualizador.</Text>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                onPress={() => openPortfolioFile(viewerFile.uri)}
+              >
+                <Text style={styles.viewerExternalLink}>Abrir arquivo no navegador ou aplicativo</Text>
+              </TouchableOpacity>
+            </View>
+          ) : viewerFile.mimeType.startsWith("video/") ? (
+            <Video
+              key={viewerFile.uri}
+              source={{ uri: viewerFile.uri }}
+              style={styles.viewerImage}
+              videoStyle={{ width: "100%", height: "100%" }}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              onError={() => setViewerError(true)}
+            />
+          ) : (
+            <Image
+              source={{ uri: viewerFile.uri }}
+              style={styles.viewerImage}
+              accessibilityLabel={viewerFile.name}
+              onError={() => setViewerError(true)}
+            />
+          ))}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -320,9 +503,38 @@ const getStyles = (theme: any) => StyleSheet.create({
   chip: { backgroundColor: theme.mainBg, borderColor: theme.borderColor, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 },
   chipText: { color: theme.textPrimary, fontSize: 12, fontWeight: "600" },
   serviceItem: { flexDirection: "row", gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.borderColor },
-  portfolioItem: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.borderColor },
-  portfolioIcon: { width: 38, height: 38, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: theme.mainBg },
-  portfolioMediaText: { color: theme.textSecondary, fontSize: 12 },
+  portfolioSection: { minWidth: 0 },
+  portfolioSectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10, marginTop: 5 },
+  portfolioSectionTitle: { color: theme.textPrimary, fontSize: 17, fontWeight: "700" },
+  portfolioSectionSubtitle: { color: theme.textSecondary, fontSize: 11, marginTop: 3 },
+  emptyPortfolioCard: { backgroundColor: theme.cardBg, borderRadius: 12, borderWidth: 1, borderColor: theme.borderColor, padding: 24, alignItems: "center", justifyContent: "center", marginBottom: 22 },
+  emptyPortfolioText: { color: theme.textPrimary, fontSize: 13, fontWeight: "700", marginTop: 4, textAlign: "center" },
+  portfolioCard: { backgroundColor: theme.cardBg, borderRadius: 12, borderWidth: 1, borderColor: theme.borderColor, overflow: "hidden", flexDirection: "row", marginBottom: 22, position: "relative" },
+  portfolioCardCompact: { flexDirection: "column" },
+  portfolioPreview: { width: 190, height: 130, backgroundColor: "#FDE4D9", justifyContent: "center", alignItems: "center" },
+  portfolioPreviewCompact: { width: "100%", height: 180 },
+  portfolioPreviewButton: { width: 190, flexShrink: 0 },
+  portfolioPreviewButtonCompact: { width: "100%" },
+  portfolioVideoPreview: { backgroundColor: "#33231D" },
+  portfolioVideoPlay: { fontSize: 24, color: "#FFFFFF" },
+  fullCoverImage: { width: "100%", height: "100%", resizeMode: "cover" },
+  coverOverlay: { position: "absolute", top: 0, left: 0 },
+  portfolioPreviewTitle: { color: "#493027", fontSize: 14, fontWeight: "700", marginTop: 8 },
+  portfolioPreviewText: { color: "#8A6D5D", fontSize: 10, marginTop: 3 },
+  portfolioInfo: { flex: 1, minWidth: 0, padding: 18, paddingTop: 26 },
+  portfolioTitle: { color: theme.textPrimary, fontSize: 15, fontWeight: "700" },
+  portfolioDescription: { color: theme.textSecondary, fontSize: 11, lineHeight: 17, marginTop: 7, maxWidth: 480 },
+  portfolioFileName: { color: theme.accent, fontSize: 9, marginTop: 8 },
+  videoGrid: { flexDirection: "row", marginBottom: 22, flexWrap: "wrap", gap: 12 },
+  videoCard: { flex: 1, minWidth: 200, backgroundColor: theme.cardBg, borderRadius: 10, borderWidth: 1, borderColor: theme.borderColor, overflow: "hidden", position: "relative" },
+  videoCardCompact: { minWidth: 0, flexBasis: "100%" },
+  videoThumbnail: { height: 130, backgroundColor: "#33231D", justifyContent: "center", alignItems: "center", position: "relative" },
+  videoIconCircle: { width: 55, height: 55, borderRadius: 28, backgroundColor: "#5A392B", justifyContent: "center", alignItems: "center" },
+  playButton: { position: "absolute", right: 10, bottom: 10, width: 32, height: 32, borderRadius: 16, backgroundColor: theme.accent, justifyContent: "center", alignItems: "center" },
+  playText: { color: "#FFFFFF", fontSize: 12, marginLeft: 2 },
+  videoInfo: { padding: 11 },
+  videoTitle: { color: theme.textPrimary, fontSize: 11, fontWeight: "700" },
+  videoSubtitle: { color: theme.textSecondary, fontSize: 9, marginTop: 3 },
   serviceIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: theme.mainBg, alignItems: "center", justifyContent: "center" },
   serviceTextWrap: { flex: 1, gap: 5 },
   serviceTitle: { color: theme.textPrimary, fontSize: 14, fontWeight: "700" },
@@ -348,4 +560,13 @@ const getStyles = (theme: any) => StyleSheet.create({
   errorTitle: { color: theme.textPrimary, fontSize: 18, fontWeight: "800" },
   secondaryButton: { backgroundColor: theme.accent, borderRadius: 8, paddingHorizontal: 18, paddingVertical: 10 },
   secondaryButtonText: { color: "#FFFFFF", fontWeight: "700" },
+  viewerOverlay: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.95)", justifyContent: "center", alignItems: "center" },
+  viewerCloseButton: { position: "absolute", top: 40, right: 30, zIndex: 10, padding: 10, backgroundColor: "rgba(255, 255, 255, 0.15)", borderRadius: 25 },
+  viewerImage: { width: "90%", height: "85%", resizeMode: "contain" },
+  viewerErrorBox: { width: "90%", maxWidth: 480, alignItems: "center", gap: 16, padding: 24 },
+  viewerErrorText: { color: "#FFFFFF", fontSize: 14, lineHeight: 22, textAlign: "center" },
+  viewerExternalLink: { color: "#FFFFFF", fontSize: 14, textAlign: "center", textDecorationLine: "underline" },
 });
+
+
+

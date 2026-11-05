@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -6,10 +6,12 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  type TextInputProps,
   TouchableOpacity,
   View,
 } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, useNavigationContainerRef } from "expo-router";
+import Head from "expo-router/head";
 import { ArrowLeft, Lock, Mail } from "lucide-react-native";
 import { salvarLogin } from "../../services/auth";
 import { refreshSession } from "../../../components/context/AuthContext";
@@ -17,18 +19,106 @@ import { buildRegisterHref, DISCOVER_ROUTE, sanitizeRedirect } from "../../../co
 
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
+// Respostas de validação (422) podem trazer uma lista em detail, não um texto.
+function apiMessage(data: unknown, field: "detail" | "mensagem", fallback: string): string {
+  if (!data || typeof data !== "object") return fallback;
+  const value = (data as Record<string, unknown>)[field];
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+// Mantém a validação compatível com o limite do bcrypt também em Android/iOS.
+function utf8ByteLength(value: string): number {
+  return Array.from(value).reduce((total, character) => {
+    const point = character.codePointAt(0) ?? 0;
+    return total + (point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4);
+  }, 0);
+}
+
+const INVALID_RESET_LINK = "Este link é inválido, expirou ou já foi usado. Solicite um novo link.";
+
 export default function LoginScreen() {
   // Destino que o visitante queria abrir antes de ser mandado ao login (validado: só rotas internas).
-  const params = useLocalSearchParams<{ redirect?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    redirect?: string | string[];
+    token?: string | string[];
+  }>();
+  const navigationRef = useNavigationContainerRef();
   const redirect = sanitizeRedirect(params.redirect);
+  const hasIncomingToken = params.token !== undefined;
+  const incomingToken = typeof params.token === "string" ? params.token : "";
+  const validIncomingToken = /^[A-Za-z0-9_-]{43}$/.test(incomingToken);
+  const incomingTokenKey = JSON.stringify(params.token);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loginMessage, setLoginMessage] = useState("");
 
   const [isRecovering, setIsRecovering] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [recoveryMessage, setRecoveryMessage] = useState("");
+  // O primeiro render deve coincidir com o HTML estatico; o efeito captura o token.
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isSubmittingRecovery, setIsSubmittingRecovery] = useState(false);
+  const activeRecoveryRequest = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!hasIncomingToken) return;
+
+    // Um novo link pode chegar enquanto esta mesma tela continua montada.
+    activeRecoveryRequest.current?.abort();
+    activeRecoveryRequest.current = null;
+    setIsSubmittingRecovery(false);
+    setIsResetting(true);
+    setIsRecovering(false);
+    setResetToken(validIncomingToken ? incomingToken : "");
+    setNewPassword("");
+    setConfirmPassword("");
+    setRecoveryEmail("");
+    setRecoveryMessage("");
+    setLoginMessage("");
+    setError(validIncomingToken ? "" : INVALID_RESET_LINK);
+
+  }, [hasIncomingToken, incomingToken, validIncomingToken]);
+
+  useEffect(() => {
+    if (!hasIncomingToken) return;
+
+    let active = true;
+    let cleared = false;
+    const clearTokenWhenReady = () => {
+      if (!active || cleared || !navigationRef.isReady()) return;
+
+      // Um evento antigo não deve apagar um novo link antes de sua captura.
+      const routeParams = navigationRef.getCurrentRoute()?.params as
+        { token?: string | string[] } | undefined;
+      if (JSON.stringify(routeParams?.token) !== incomingTokenKey) return;
+
+      // setParams também emite eventos de navegação: marque antes de chamá-lo.
+      cleared = true;
+      router.setParams({ token: undefined });
+    };
+
+    // Na primeira montagem (e no StrictMode), os efeitos da tela podem executar
+    // antes de o navegador raiz ficar pronto. Escute antes de verificar o ref.
+    const removeReadyListener = navigationRef.addListener("ready", clearTokenWhenReady);
+    const removeStateListener = navigationRef.addListener("state", clearTokenWhenReady);
+    clearTokenWhenReady();
+
+    return () => {
+      active = false;
+      removeReadyListener();
+      removeStateListener();
+    };
+  }, [navigationRef, hasIncomingToken, incomingTokenKey]);
+
+  useEffect(() => () => {
+    activeRecoveryRequest.current?.abort();
+    activeRecoveryRequest.current = null;
+  }, []);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -67,58 +157,163 @@ export default function LoginScreen() {
     }
   };
 
+  const clearRecoveryRequest = () => {
+    activeRecoveryRequest.current?.abort();
+    activeRecoveryRequest.current = null;
+    setIsSubmittingRecovery(false);
+  };
+
   const openRecovery = () => {
+    clearRecoveryRequest();
     setIsRecovering(true);
+    setIsResetting(false);
+    setResetToken("");
+    setNewPassword("");
+    setConfirmPassword("");
     setRecoveryEmail(email);
     setRecoveryMessage("");
+    setLoginMessage("");
     setError("");
   };
 
   const closeRecovery = () => {
+    clearRecoveryRequest();
     setIsRecovering(false);
+    setIsResetting(false);
+    setResetToken("");
+    setNewPassword("");
+    setConfirmPassword("");
     setRecoveryEmail("");
     setRecoveryMessage("");
     setError("");
   };
 
   const handleRecovery = async () => {
-    if (!recoveryEmail.trim()) {
+    if (activeRecoveryRequest.current) return;
+    const normalizedEmail = recoveryEmail.trim();
+    if (!normalizedEmail) {
       setError("Informe o e-mail usado no cadastro.");
       return;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setError("Informe um endereço de e-mail válido.");
+      return;
+    }
+
+    const controller = new AbortController();
+    activeRecoveryRequest.current = controller;
+    setIsSubmittingRecovery(true);
+    const timeout = setTimeout(() => controller.abort(), 25000);
 
     try {
       setError("");
-
       const response = await fetch(`${URL_API}/api/recuperar-senha`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: recoveryEmail.trim(),
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: normalizedEmail }),
+        signal: controller.signal,
+        ...(Platform.OS === "web" ? { referrerPolicy: "no-referrer" as const } : {}),
       });
-
-      const data = await response.json();
+      const data: unknown = await response.json();
+      if (activeRecoveryRequest.current !== controller) return;
 
       if (!response.ok) {
-        setError(data.detail || "Não foi possível processar a recuperação.");
+        setError(apiMessage(data, "detail", response.status === 422
+          ? "Informe um endereço de e-mail válido."
+          : "Não foi possível processar a recuperação. Tente novamente."));
         return;
       }
 
-      setRecoveryMessage(
-        data.mensagem || "Se o e-mail informado estiver cadastrado, você receberá um link com as instruções para redefinir sua senha."
-      );
-    } catch (err) {
-      console.log("Erro de conexão na recuperação:", err);
-      setError("Não foi possível conectar ao servidor. Verifique sua conexão.");
+      setRecoveryMessage(apiMessage(data, "mensagem",
+        "Se o e-mail informado estiver cadastrado, você receberá um link com as instruções para redefinir sua senha."
+      ));
+    } catch {
+      if (activeRecoveryRequest.current === controller) {
+        setError(controller.signal.aborted
+          ? "O servidor demorou para responder. Tente novamente em instantes."
+          : "Não foi possível conectar ao servidor. Verifique sua conexão.");
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (activeRecoveryRequest.current === controller) {
+        activeRecoveryRequest.current = null;
+        setIsSubmittingRecovery(false);
+      }
     }
   };
 
-  if (isRecovering) {
+  const handleResetPassword = async () => {
+    if (activeRecoveryRequest.current || !resetToken) return;
+    if (!newPassword.trim() || Array.from(newPassword).length < 8) {
+      setError("A nova senha deve ter pelo menos 8 caracteres.");
+      return;
+    }
+    if (utf8ByteLength(newPassword) > 72) {
+      setError("A senha está muito longa. Reduza o tamanho, especialmente se usar acentos ou emojis.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("A confirmação deve ser igual à nova senha.");
+      return;
+    }
+
+    const controller = new AbortController();
+    activeRecoveryRequest.current = controller;
+    setIsSubmittingRecovery(true);
+    const timeout = setTimeout(() => controller.abort(), 25000);
+
+    try {
+      setError("");
+      const response = await fetch(`${URL_API}/api/redefinir-senha`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: resetToken, nova_senha: newPassword }),
+        signal: controller.signal,
+        ...(Platform.OS === "web" ? { referrerPolicy: "no-referrer" as const } : {}),
+      });
+      const data: unknown = await response.json();
+      if (activeRecoveryRequest.current !== controller) return;
+
+      if (!response.ok) {
+        setError(apiMessage(data, "detail", response.status === 400
+          ? INVALID_RESET_LINK
+          : "Não foi possível redefinir a senha. Confira os dados e tente novamente."));
+        if (response.status === 400) {
+          setResetToken("");
+          setNewPassword("");
+          setConfirmPassword("");
+        }
+        return;
+      }
+
+      setResetToken("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setPassword("");
+      setRecoveryEmail("");
+      setRecoveryMessage("");
+      setIsResetting(false);
+      setIsRecovering(false);
+      setLoginMessage(apiMessage(data, "mensagem", "Senha redefinida com sucesso. Entre com sua nova senha."));
+    } catch {
+      if (activeRecoveryRequest.current === controller) {
+        setError(controller.signal.aborted
+          ? "O servidor demorou para responder. Tente novamente em instantes."
+          : "Não foi possível conectar ao servidor. Verifique sua conexão.");
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (activeRecoveryRequest.current === controller) {
+        activeRecoveryRequest.current = null;
+        setIsSubmittingRecovery(false);
+      }
+    }
+  };
+
+  if (isResetting) {
     return (
       <SafeAreaView style={styles.safeArea}>
+        <Head><meta name="referrer" content="no-referrer" /></Head>
         <KeyboardAvoidingView
           style={styles.container}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -128,7 +323,97 @@ export default function LoginScreen() {
           <View style={styles.circleBottomRight} />
 
           <View style={styles.loginCard}>
-            <TouchableOpacity onPress={closeRecovery} style={styles.backButton}>
+            <TouchableOpacity onPress={closeRecovery} disabled={isSubmittingRecovery} style={styles.backButton}>
+              <ArrowLeft size={18} color="#E15743" />
+              <Text style={styles.backText}>Voltar para o login</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.title}>Redefinir senha</Text>
+            <Text style={styles.subtitle}>
+              Crie uma nova senha com pelo menos 8 caracteres para acessar sua conta.
+            </Text>
+
+            {resetToken ? (
+              <>
+                <Text style={styles.label}>Nova senha</Text>
+                <View style={styles.passwordContainer}>
+                  <Lock size={16} color="#9D8E85" style={styles.lockIcon} />
+                  <TextInput
+                    value={newPassword}
+                    onChangeText={(value) => { setNewPassword(value); if (error) setError(""); }}
+                    placeholder="••••••••"
+                    placeholderTextColor="#9D8E85"
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoComplete="new-password"
+                    textContentType="newPassword"
+                    accessibilityLabel="Nova senha"
+                    editable={!isSubmittingRecovery}
+                    style={styles.passwordInput as TextInputProps["style"]}
+                  />
+                </View>
+
+                <Text style={styles.label}>Confirmar nova senha</Text>
+                <View style={styles.passwordContainer}>
+                  <Lock size={16} color="#9D8E85" style={styles.lockIcon} />
+                  <TextInput
+                    value={confirmPassword}
+                    onChangeText={(value) => { setConfirmPassword(value); if (error) setError(""); }}
+                    placeholder="••••••••"
+                    placeholderTextColor="#9D8E85"
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoComplete="new-password"
+                    textContentType="newPassword"
+                    accessibilityLabel="Confirmar nova senha"
+                    editable={!isSubmittingRecovery}
+                    style={styles.passwordInput as TextInputProps["style"]}
+                  />
+                </View>
+              </>
+            ) : null}
+
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            {resetToken ? (
+              <TouchableOpacity
+                style={styles.loginButton}
+                activeOpacity={0.85}
+                onPress={handleResetPassword}
+                disabled={isSubmittingRecovery}
+                accessibilityState={{ disabled: isSubmittingRecovery, busy: isSubmittingRecovery }}
+              >
+                <Text style={styles.loginButtonText}>
+                  {isSubmittingRecovery ? "Salvando..." : "Redefinir senha"}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.secondaryButton} onPress={openRecovery}>
+                <Text style={styles.secondaryButtonText}>Solicitar novo link</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
+  if (isRecovering) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <Head><meta name="referrer" content="no-referrer" /></Head>
+        <KeyboardAvoidingView
+          style={styles.container}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={styles.circleTopLeft} />
+          <View style={styles.circleTopRight} />
+          <View style={styles.circleBottomRight} />
+
+          <View style={styles.loginCard}>
+            <TouchableOpacity onPress={closeRecovery} disabled={isSubmittingRecovery} style={styles.backButton}>
               <ArrowLeft size={18} color="#E15743" />
               <Text style={styles.backText}>Voltar para o login</Text>
             </TouchableOpacity>
@@ -144,6 +429,7 @@ export default function LoginScreen() {
               <Mail size={16} color="#9D8E85" style={styles.inputIcon} />
               <TextInput
                 value={recoveryEmail}
+                editable={!isSubmittingRecovery}
                 onChangeText={(value) => {
                   setRecoveryEmail(value);
                   if (error) setError("");
@@ -168,9 +454,11 @@ export default function LoginScreen() {
                 style={styles.loginButton}
                 activeOpacity={0.85}
                 onPress={handleRecovery}
+                disabled={isSubmittingRecovery}
+                accessibilityState={{ disabled: isSubmittingRecovery, busy: isSubmittingRecovery }}
               >
                 <Text style={styles.loginButtonText}>
-                  Enviar link de recuperação
+                  {isSubmittingRecovery ? "Enviando..." : "Enviar link de recuperação"}
                 </Text>
               </TouchableOpacity>
             )}
@@ -193,6 +481,7 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <Head><meta name="referrer" content="no-referrer" /></Head>
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -242,6 +531,7 @@ export default function LoginScreen() {
           </View>
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {loginMessage ? <Text style={styles.successText}>{loginMessage}</Text> : null}
 
           <TouchableOpacity
             style={styles.forgotButton}

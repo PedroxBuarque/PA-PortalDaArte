@@ -1,0 +1,357 @@
+PORTAL DA ARTE — PORTFÓLIOS NO SUPABASE STORAGE
+Implementação baseada no arquivo PA-PortalDaArte(1).rar enviado nesta conversa.
+Data: 04/11/2026.
+
+1. O QUE FOI IMPLEMENTADO
+
+O campo de arquivo do portfólio agora envia o conteúdo ao Supabase Storage.
+Antes, a tela selecionava o arquivo, mas publicava somente título e descrição.
+
+Os dois botões existentes foram integrados:
+
+- Adicionar: imagem, vídeo ou PDF; sem arquivo, continua criando um trabalho de texto.
+- Adicionar vídeo: vídeo obrigatório e imagem de capa opcional, usando o modal e
+  o formato de cartão que já existiam.
+
+Ao recarregar a página, título, descrição, arquivo, seção e capa são recuperados
+do servidor. Imagens e vídeos usam os visualizadores existentes. PDFs abrem pelo
+nome do arquivo. O perfil público também apresenta um link legível para a mídia.
+
+Cada arquivo recebe um nome aleatório e fica na pasta do usuário autenticado.
+Exemplos de caminhos no Storage:
+
+  Bucket: portfolios
+  Objeto: 42/7a1ff20a1453451f9cd7fb16fac13bda.png
+  Objeto: 42/67a7e495d58f4c40b927b7d901854ec0.pdf
+  Objeto: 84/8f701befb75e49e5a85a8419ecfcad4d.mp4
+
+42 e 84 são exemplos de IDs da tabela usuarios. O ID vem do JWT validado pela API,
+nunca de um campo de destino enviado pelo navegador. Nomes originais continuam
+visíveis no aplicativo, mas não são usados como chave do objeto na nuvem.
+
+Não é necessário criar uma pasta manualmente no cadastro. No Storage, a pasta
+corresponde ao prefixo do caminho e aparece quando o usuário envia o primeiro
+arquivo. Um usuário sem arquivos ainda não terá uma pasta visível no painel.
+
+Foi mantida a regra atual do produto: o portfólio é um recurso de contas com
+perfil de artista. O ID usado continua sendo o ID da conta de usuário.
+
+2. COMO OS COMPONENTES SE COMUNICAM
+
+O aplicativo envia o arquivo à API FastAPI com o token de login já existente.
+A API valida a sessão, confirma o perfil de artista, verifica o arquivo e o envia
+ao Supabase. No MySQL, salva título, descrição, metadados e a referência durável
+do objeto. O arquivo binário fica no Supabase; os dados do negócio ficam no MySQL.
+
+O bucket é privado. Para um trabalho publicado, o aplicativo usa uma URL estável
+da API, como /api/portfolio/arquivos/123. Essa rota confirma a publicação e a pasta
+do dono e redireciona para uma URL assinada do Supabase, válida por 600 segundos.
+A assinatura é gerada novamente quando a URL da API é acessada; uma URL temporária
+não é gravada no MySQL. A capa usa /api/portfolio/arquivos/123/capa.
+
+Um portfólio publicado continua visível aos visitantes, conforme o fluxo público
+que o projeto já tinha. Bucket privado não significa que um trabalho publicado
+seja visível apenas ao dono. A API libera a leitura desse trabalho; upload e
+exclusão exigem sessão e propriedade. Quem recebe uma URL assinada pode usá-la
+durante sua validade. Uma assinatura já emitida pode durar até dez minutos após
+uma mudança de publicação; o endpoint da API recusa novas aberturas quando o item
+deixa de estar publicado.
+
+O login não foi migrado para Supabase Auth. Por isso, policies com auth.uid() não
+representariam os usuários atuais do Portal da Arte. A chave secreta fica somente
+no backend, e a API faz a autorização por usuário. O script do bucket bloqueia
+acesso direto de anon/authenticated nesse bucket, inclusive diante de outra policy
+permissiva. A service_role da chave de servidor ignora RLS por design do Supabase.
+
+3. CONFIGURAÇÃO PASSO A PASSO
+
+3.1. Criar o projeto e o bucket no Supabase
+
+Crie ou abra seu projeto em https://supabase.com/dashboard.
+Não é necessário ter domínio próprio: o aplicativo pode continuar em localhost,
+e a API local se conecta ao endereço HTTPS fornecido pelo Supabase.
+
+No SQL Editor do SUPABASE, abra uma consulta, cole e execute o conteúdo de:
+
+  BancoDeDados/supabase_portfolio_bucket.sql
+
+Esse script configura o bucket privado portfolios, os tipos permitidos, o limite
+de 52.428.800 bytes e a policy restritiva específica desse bucket. Pode ser
+executado novamente. Não exclui os arquivos que já estiverem no bucket.
+
+Confirme no painel Storage que portfolios aparece como privado. Não crie um
+bucket público nem uma policy pública de upload para este fluxo.
+
+3.2. Atualizar o banco MySQL que você já utiliza
+
+No MySQL Workbench ou cliente MySQL do seu projeto, execute:
+
+  BancoDeDados/migracao_portfolio_supabase.sql
+
+Esse arquivo é para MYSQL, não para o SQL Editor do Supabase.
+Se DB_NAME no seu .env for diferente de portal_da_arte, ajuste a linha USE do
+script para o nome correto antes de executar.
+
+Use essa migração para uma base existente. Ela acrescenta PDF ao enum tipo_midia
+e cinco colunas na tabela itens_portfolio: arquivo_nome, arquivo_mime,
+arquivo_tamanho, secao e capa_url. Os usuários e trabalhos existentes são mantidos.
+
+O BD.sql completo também contém a definição atualizada para instalações novas.
+Como o dump original contém DROP TABLE, não reimporte BD.sql sobre a base em uso
+para instalar esta funcionalidade. A migração foi criada justamente para isso.
+
+3.3. Instalar as duas dependências adicionais do backend
+
+Use Python 3.11 ou superior. A validação foi executada com Python 3.12.
+Na pasta raiz do projeto, a que contém requirements.txt e python-api:
+
+  python -m pip install -r requirements.txt
+
+Foram adicionados httpx==0.28.1 e python-multipart==0.0.33. O primeiro realiza as
+chamadas HTTP ao Storage; o segundo permite receber arquivos multipart no FastAPI.
+As versões que já estavam no arquivo foram mantidas.
+
+3.4. Acrescentar as variáveis ao .env existente da API
+
+Abra python-api/.env e acrescente este bloco. Preserve as configurações de banco,
+SMTP e SECRET_KEY que você já preencheu para login e recuperação de senha:
+
+  SUPABASE_URL=https://SEU_PROJETO.supabase.co
+  SUPABASE_SECRET_KEY=COLE_AQUI_SUA_CHAVE_SECRETA
+  SUPABASE_PORTFOLIO_BUCKET=portfolios
+  PORTFOLIO_MAX_FILE_MB=50
+  SUPABASE_STORAGE_TIMEOUT_SECONDS=60
+
+Substitua os dois valores de exemplo. O valor real de SUPABASE_SECRET_KEY começa
+com sb_secret_. Encontre a URL do projeto no diálogo Connect e a chave secreta em
+Settings > API Keys. Não use a chave publishable/anon nesse backend administrativo.
+
+Para um projeto que ainda usa a chave antiga service_role, é possível deixar
+SUPABASE_SECRET_KEY vazia e preencher SUPABASE_SERVICE_ROLE_KEY. A chave nova é
+preferível. Não preencha as duas esperando que uma chave nova inválida seja
+ignorada: quando presente, SUPABASE_SECRET_KEY tem precedência.
+
+Não coloque a chave secreta em EXPO_PUBLIC_, em arquivo TSX/JS ou no frontend.
+Não é necessário enviar essa chave pelo chat. Ela deve ficar no .env local da API.
+O .env.example entregue contém apenas o modelo para configuração.
+
+3.5. Conferir a configuração sem enviar um arquivo
+
+No PowerShell, a partir da raiz do projeto:
+
+  cd python-api
+  python verificar_supabase.py
+
+O verificador faz consultas de leitura: confirma a conexão com o Supabase,
+o bucket privado e as colunas do MySQL. Não envia nem apaga arquivos, não altera
+tabelas e não imprime a chave. Corrija qualquer item marcado como FALHA.
+
+3.6. Reiniciar a API e executar o frontend
+
+Na pasta python-api:
+
+  python -m uvicorn main:app --reload --port 8000
+
+Em outro PowerShell, abra a pasta PA-PortalDaArte que contém o package.json do Expo.
+Para uma cópia nova do projeto, instale as dependências; depois execute a versão web:
+
+  npm install
+  npm run web
+
+O frontend usa EXPO_PUBLIC_API_URL para encontrar a API. Para navegador e API no
+mesmo computador, o valor pode ser http://127.0.0.1:8000. O frontend não precisa
+de nenhuma chave do Supabase. Em um celular físico, localhost aponta para o próprio
+celular; nesse caso, configure o endereço acessível do computador que executa a API.
+
+3.7. Fazer o primeiro teste na sua conta
+
+- Entre em uma conta com perfil de artista.
+- Em Perfil > Portfólio > Adicionar, informe nome, descrição e escolha uma imagem
+  ou PDF; confirme o envio.
+- Recarregue a página e abra o arquivo pelo cartão/nome.
+- Teste Adicionar vídeo, incluindo uma capa opcional.
+- No Supabase, abra Storage > portfolios e confira a pasta com o ID dessa conta.
+- A exclusão pelo cartão remove o arquivo e a capa, quando houver.
+
+Arquivos selecionados antes desta integração não tinham sido enviados ao servidor.
+Será necessário anexá-los novamente; não existe conteúdo remoto antigo para migrar.
+
+4. FORMATOS E LIMITES
+
+Imagens: .jpg, .jpeg, .png, .gif e .webp.
+Vídeos: .mp4, .mov e .webm.
+Documentos: .pdf.
+
+Arquivo principal: até 50 MiB por padrão.
+Capa: até 10 MiB, ou o limite do principal se este for menor.
+PORTFOLIO_MAX_FILE_MB aceita inteiros de 1 a 50. A interface usa 50 MiB como limite
+geral de conveniência; se você configurar um valor menor, a API aplicará esse valor
+e informará o limite ao usuário. Mantenha o limite do bucket coerente com o da API.
+O limite global de Storage do projeto Supabase também precisa permitir o upload.
+
+As mensagens da tela usam MB; os cálculos são em MiB: 1 MiB = 1.048.576 bytes.
+O sistema verifica extensão, MIME e assinatura inicial, além de tamanho e arquivo
+vazio. Essa verificação não equivale a antivírus nem à decodificação integral da mídia.
+
+O envio usa upload HTTP padrão pela API. Não há upload retomável/TUS nesta versão.
+Uma interrupção de rede pode exigir novo envio. A própria documentação Supabase
+recomenda TUS para maior confiabilidade em arquivos acima de 6 MB. O limite de
+50 MiB adotado aqui é deliberadamente moderado e compatível com a configuração
+proposta do bucket; não há envio ilimitado de vídeos.
+
+5. ARQUIVOS ALTERADOS E POR QUÊ
+
+python-api/main.py
+  Integra os endpoints de arquivo, capa, leitura pública e exclusão. Confere o dono
+  no MySQL e usa a sessão existente. Mantém o endpoint JSON de texto. Carrega .env
+  explicitamente ao lado do arquivo, aceita UTF-8 com BOM do Windows e preserva
+  a precedência de variáveis já exportadas no ambiente.
+
+python-api/portfolio_storage.py — novo
+  Centraliza configuração, validação, nomes UUID, referências de Storage,
+  chamadas REST, URLs assinadas e limite do corpo de upload em streaming. A chave
+  fica no servidor e mensagens de erro não reproduzem respostas sensíveis do provedor.
+
+python-api/verificar_supabase.py — novo
+  Ajuda a conferir .env, bucket privado e migração MySQL com consultas de leitura.
+
+python-api/.env.example
+  Acrescenta as variáveis do Storage e orienta quais scripts SQL utilizar.
+
+python-api/test_portfolio_storage.py — novo
+  Testa autorização, arquivos, persistência, respostas REST e falhas controladas.
+
+requirements.txt
+  Acrescenta httpx e python-multipart; não introduz SDK Supabase no frontend.
+
+BancoDeDados/BD.sql
+  Atualiza apenas a definição da tabela itens_portfolio para instalações novas.
+
+BancoDeDados/migracao_portfolio_supabase.sql — novo
+  Atualiza bases existentes de forma incremental e repetível, preservando dados.
+
+BancoDeDados/supabase_portfolio_bucket.sql — novo
+  Configura o bucket privado, tipos, tamanho e restrição de acesso direto ao bucket.
+
+PA-PortalDaArte/src/app/pages/perfil/perfil.tsx
+  Faz o envio real dos dois modais, restaura as mídias e capas ao carregar, abre PDF,
+  aguarda confirmação do servidor antes de alterar a lista e impede cliques duplicados.
+  Erros são apresentados também no navegador. Seleções temporárias são liberadas.
+
+PA-PortalDaArte/src/app/pages/perfil_publico/perfil_publico.tsx
+  Torna a mídia publicada acessível por um link com o nome do arquivo.
+
+PA-PortalDaArte/src/services/portfolio.ts — novo
+  Reúne tipos, conversão para FormData, limites de conveniência, resolução das URLs
+  e abertura/avisos por plataforma. Fica fora de src/app para não virar uma rota Expo.
+
+.gitignore — novo na raiz
+  Evita incluir arquivos .env de qualquer componente em novos commits e ignora
+  dependências/caches gerados. .env.example continua permitido. Essa regra não
+  remove automaticamente um segredo que já tenha sido versionado anteriormente.
+
+SUPABASE_PORTFOLIO_GUIA.txt — este arquivo
+  Explica instalação, comportamento, decisões, mudanças e limites de validação.
+
+As cores, medidas, espaçamentos e definições StyleSheet dos dois perfis foram
+preservados byte a byte. Os rótulos de formato, estado Enviando... e rótulos de
+acessibilidade foram ajustados para refletir as funções agora disponíveis.
+O projeto continua com as mesmas versões do Expo/React e o mesmo sistema de login.
+
+6. TESTES E LIMITES DE VERIFICAÇÃO
+
+Backend: 34 testes novos de Storage e 20 testes existentes de recuperação de senha
+passaram. Incluem tentativa de acessar outra pasta, arquivo disfarçado, tamanho,
+bucket público recusado, chaves novas e antigas, vídeo com capa, falhas de upload,
+rollback SQL, limpeza de arquivos, conflito de nome e confirmação de COMMIT perdida.
+
+MySQL 8.0.46 real e descartável: 20 verificações passaram, incluindo executar a
+migração duas vezes, preservar um item anterior, persistir metadados, validar JWT,
+separar pastas de duas contas, falha SQL real com trigger e excluir vídeo+capa.
+Nenhum dado real de usuário foi importado nessa validação.
+
+Frontend: oito verificações de serialização/validação passaram, incluindo bytes e
+boundary do multipart web, vídeo+capa, URLs e contrato de URI nativo simulado.
+No Chromium com Expo em desenvolvimento, 13 fluxos funcionais passaram: envio de
+imagem, bloqueio de duplo clique, recarregamento, abertura de PDF, erro e repetição,
+texto sem arquivo, vídeo com capa, persistência das duas seções e exclusão com
+repetição após falha. Não ocorreram erros JavaScript nesses fluxos.
+
+Uma checagem adicional em largura de 390 pixels identificou transbordamento
+horizontal no perfil público. A barra lateral fixa e a composição do cabeçalho/
+cartão do artista já estavam no projeto anexado. Esse layout não foi redesenhado.
+As definições de estilo, Sidebar e Header foram comparadas com o arquivo original.
+
+O TypeScript do projeto anexado já apresentava 428 diagnósticos antes da alteração.
+Depois das mudanças, permaneceu com os mesmos 428, sem diagnóstico novo quando
+comparadas as mensagens independentemente dos números de linha. Isso não significa
+que o projeto inteiro passou em tsc. Os estilos existentes não foram reescritos.
+
+As chamadas HTTP do Supabase foram simuladas nos testes com o contrato REST
+documentado. Não foi usado um projeto Supabase real, porque as credenciais ainda
+precisam ser configuradas por você. O script SQL do Supabase foi preparado e
+revisado, mas sua execução no seu projeto depende do passo 3.1. Android e iOS
+não foram executados em aparelho/emulador; o fluxo web e o contrato nativo foram
+verificados separadamente.
+
+Para repetir os testes unitários, dentro de python-api:
+
+  python -m unittest -v test_portfolio_storage test_recuperacao_senha
+
+7. TRATAMENTO DE FALHAS E LIMITES DO ESCOPO
+
+MySQL e Supabase são serviços diferentes e não compartilham uma transação.
+Se a gravação no banco falha antes do COMMIT, a API desfaz os registros e tenta
+remover os objetos recém-enviados. Se essa limpeza também falha, os caminhos
+UUID ficam no log para conferência/limpeza administrativa; a chave não é registrada.
+
+Uma conexão pode cair após o banco concluir o COMMIT. Nesse caso, a API preserva
+a mídia e pede para atualizar o portfólio antes de repetir o envio, evitando
+apagar um arquivo que já pertence a um item salvo.
+
+Na exclusão, falha no Storage mantém o registro para nova tentativa. Se a remoção
+remota termina e o banco falha depois, pode ficar temporariamente um registro sem
+mídia; repetir a exclusão permite concluir a operação. Não há promessa de atomicidade
+distribuída entre os dois serviços.
+
+Destaque e ordenação conservam o comportamento local que o projeto já possuía.
+A persistência implementada cobre os arquivos, os dados do trabalho, a seção e a capa.
+O envio de avatar, anexos de mensagens e outras áreas não foi convertido para Storage.
+
+8. ENTREGA E APLICAÇÃO DOS ARQUIVOS
+
+O projeto completo contém o código e os recursos necessários, com package.json,
+package-lock.json e requirements.txt. Dependências instaladas, caches, ambiente
+virtual, histórico .git e arquivos .env pessoais não são incluídos no pacote de
+entrega. Recrie as dependências pelos comandos acima e use sua configuração local.
+
+O pacote somente de alterações mantém os caminhos relativos para facilitar a
+cópia sobre o projeto existente. Preserve seus arquivos .env; acrescente apenas
+o bloco Supabase. Aplique a migração MySQL antes de testar as novas listagens.
+Nenhuma alteração foi enviada ao GitHub e nenhum projeto Supabase foi criado
+automaticamente na sua conta.
+
+9. REFERÊNCIAS OFICIAIS
+
+Supabase — buckets privados, acesso e URLs assinadas:
+https://supabase.com/docs/guides/storage/buckets/fundamentals
+https://supabase.com/docs/guides/storage/security/access-control
+
+Supabase — criação/configuração de bucket e limites:
+https://supabase.com/docs/guides/storage/buckets/creating-buckets
+https://supabase.com/docs/guides/storage/uploads/file-limits
+https://supabase.com/docs/guides/storage/uploads/standard-uploads
+
+Supabase — chaves de API e uso exclusivo da chave secreta no servidor:
+https://supabase.com/docs/guides/getting-started/api-keys
+
+PostgreSQL — policies restritivas combinadas por AND:
+https://www.postgresql.org/docs/current/sql-createpolicy.html
+
+Expo — documentação consultada conforme AGENTS.md e tipos do DocumentPicker:
+https://docs.expo.dev/versions/v57.0.0/
+https://docs.expo.dev/versions/v54.0.0/sdk/document-picker/
+
+Dependências:
+https://pypi.org/project/httpx/0.28.1/
+https://pypi.org/project/python-multipart/0.0.33/
