@@ -23,6 +23,7 @@ import { useAuth } from "../../../components/context/AuthContext";
 import { useSearch } from "../../../components/context/SearchContext";
 import { useFavorites } from "../../../components/context/FavoritesContext";
 import { ARTIST_PROFILE_ROUTE, DISCOVER_ROUTE, FAVORITES_ROUTE } from "../../../constants/auth-routes";
+import { buildCategoryOptions, categoryKey } from "../../../constants/artist-categories";
 
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -151,15 +152,34 @@ const toText = (value: any): string => {
   return "";
 };
 
+// Remove vazios e repetidos (sem diferenciar acentos/maiúsculas), mantendo a primeira grafia.
+const uniqueNames = (names: string[]): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  names.forEach((name) => {
+    const label = String(name ?? "").replace(/\s+/g, " ").trim();
+    const key = categoryKey(label);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    result.push(label);
+  });
+  return result;
+};
+
 const normalizeArtist = (raw: any, index: number): Artist => {
   const profile = firstValue(raw.perfil, raw.profile, {});
-  const categories = firstValue(raw.categorias, raw.categories, raw.categoria, raw.category, "");
+  // Categorias REAIS do Perfil do artista: a principal (categoria_atuacao) + as "Categorias e estilos"
+  // (artista_categorias, inclusive personalizadas). É a mesma informação que o Perfil edita.
+  const rawCategories = firstValue(raw.categorias, raw.categories, raw.categoria, raw.category, "");
+  const categoryNames = uniqueNames([raw.categoria_atuacao, ...(Array.isArray(rawCategories) ? rawCategories : [rawCategories])].map(toText));
+  const primaryCategory = categoryNames[0] ?? "";
   const services = firstValue(raw.servicos, raw.services, raw.instrumentos, raw.instruments, "");
-  const categoryText = toText(categories);
+  const categoryText = categoryNames.join(" ");
   const serviceText = toText(services);
   const name = String(firstValue(raw.nome_artistico, raw.nome, raw.name, raw.nome_completo, raw.name_artistico, "Artista"));
   // Só usa dados que existem no banco; sem categoria/estilo, o card simplesmente não mostra a etiqueta.
-  const style = textOrEmpty(raw.estilo_musical, raw.estilo, raw.style, raw.instrumento, raw.instrument, serviceText, categoryText);
+  const style = textOrEmpty(primaryCategory, raw.estilo_musical, raw.estilo, raw.style, raw.instrumento, raw.instrument, serviceText);
+  // `category` serve apenas para escolher o emoji/ícone do avatar. O FILTRO usa categoryKeys (nomes reais).
   const categorySource = categoryText.toLowerCase();
   const category = /banda/.test(categorySource) ? "Bandas"
     : /foto/.test(categorySource) ? "Fotógrafos"
@@ -171,11 +191,26 @@ const normalizeArtist = (raw: any, index: number): Artist => {
   const serviceDetails = serviceRecords.map((service: any) => [service?.titulo, service?.nome, service?.descricao].map(toText).join(" "));
   const searchableText = foldText([name, categoryText, serviceText, ...serviceDetails, style, raw.biografia, raw.bio, raw.instrumentos, raw.instruments, raw.descricao, raw.description]
     .map(toText).join(" "));
-  const servicePrice = serviceRecords
-    .map((service: any) => firstValue(service.preco_min, service.preco, service.price, service.valor_hora))
-    .find((value: any) => value !== undefined && value !== null && value !== "");
-  const rawPrice = firstValue(raw.preco_min, raw.preco, raw.price, raw.valor_hora, raw.valor, servicePrice, 0);
+  const serviceTitles = uniqueNames(serviceRecords.map((service: any) => toText(service?.titulo ?? service?.nome)));
+  // Modalidades atendidas: a do artista + a de cada serviço ("ambos" = presencial e remoto).
+  const modalities = new Set<string>();
+  [raw.modalidade_atendimento, raw.modalidade, ...serviceRecords.map((service: any) => service?.modalidade)].forEach((value) => {
+    const mode = foldText(String(value ?? ""));
+    if (mode === "ambos") { modalities.add("presencial"); modalities.add("remoto"); }
+    else if (mode === "presencial" || mode === "remoto") modalities.add(mode);
+  });
+  // Preço: faixa entre o menor e o maior valor entre os serviços ativos ("a partir de" = o menor).
+  const lows: number[] = [];
+  const highs: number[] = [];
+  serviceRecords.forEach((service: any) => {
+    const low = Number(firstValue(service?.preco_min, service?.preco, service?.price, service?.valor_hora));
+    const high = Number(firstValue(service?.preco_max, service?.preco_min, service?.preco, service?.price, service?.valor_hora));
+    if (Number.isFinite(low) && low > 0) lows.push(low);
+    if (Number.isFinite(high) && high > 0) highs.push(high);
+  });
+  const rawPrice = firstValue(raw.preco_min, raw.preco, raw.price, raw.valor_hora, raw.valor, lows.length ? Math.min(...lows) : undefined, 0);
   const price = Number(rawPrice) || 0;
+  const priceMax = Math.max(price, ...highs);
   const rawRating = firstValue(raw.nota_media, raw.avaliacao_media, raw.rating, 0);
   const rating = Number(rawRating) || 0;
   return {
@@ -188,6 +223,11 @@ const normalizeArtist = (raw: any, index: number): Artist => {
     rating,
     reviews: Number(firstValue(raw.total_avaliacoes, raw.reviews, raw.avaliacoes, 0)) || 0,
     price,
+    priceMax,
+    categories: categoryNames,
+    categoryKeys: categoryNames.map(categoryKey),
+    modalities: Array.from(modalities),
+    serviceTitles,
     distanceKm: Number(firstValue(raw.distanceKm, raw.distancia_km, raw.distancia, NaN)),
     city: textOrEmpty(raw.cidade_atendimento, raw.cidade, raw.city, raw.municipio, raw.nome_municipio, raw.localidade),
     state: textOrEmpty(raw.estado_atendimento, raw.estado, raw.state, raw.uf, raw.sigla_estado, raw.estado_sigla),
@@ -206,7 +246,12 @@ type Artist = {
   avatarColor: string;
   rating: number;
   reviews: number;
-  price: number;
+  price: number; // menor valor entre os serviços ("a partir de")
+  priceMax: number;
+  categories: string[]; // nomes reais (categoria principal + categorias e estilos do Perfil)
+  categoryKeys: string[];
+  modalities: string[]; // "presencial" e/ou "remoto"
+  serviceTitles: string[];
   distanceKm: number;
   city: string;
   state: string;
@@ -226,20 +271,39 @@ const SORT_OPTIONS = [
   { id: "distance", label: "Mais próximos" },
 ];
 
-const CATEGORY_OPTIONS = [
-  "Todos os artistas",
-  "Músicos",
-  "Bandas",
-  "Fotógrafos",
-  "Pintores",
-  "Dançarinos",
+// As opções de categoria NÃO são fixas: vêm do Perfil (src/constants/artist-categories.ts) somadas às
+// categorias personalizadas que existem nos dados dos artistas. Aqui só o rótulo "todas".
+const ALL_CATEGORIES = "Todos os artistas";
+const ALL_SERVICES = "Todos os serviços";
+const MODALITY_OPTIONS = [
+  { id: "todas", label: "Todas" },
+  { id: "presencial", label: "Presencial" },
+  { id: "remoto", label: "Remoto" },
 ];
 const RATING_OPTIONS = [5, 4, 3];
 const DISTANCE_OPTIONS = [10, 25, 50, 100];
 const ALL_LOCATIONS = "Todas as localidades";
 
-const MAX_SLIDER_VAL = 5000;
 const TRACK_WIDTH = 225;
+
+// Teto do slider de preço: acompanha o maior valor cadastrado pelos artistas (mínimo R$ 1.000).
+const computeSliderMax = (artists: Artist[]) => {
+  const highest = artists.reduce((max, artist) => Math.max(max, artist.priceMax || 0), 0);
+  return Math.max(1000, Math.ceil(highest / 500) * 500);
+};
+
+// Serviços cadastrados pelos artistas (sem repetir), do mais comum para o menos comum.
+const buildServiceOptions = (artists: Artist[]): string[] => {
+  const found = new Map<string, { label: string; count: number }>();
+  artists.forEach((artist) => artist.serviceTitles.forEach((title) => {
+    const key = categoryKey(title);
+    const entry = found.get(key);
+    if (entry) entry.count += 1; else found.set(key, { label: title, count: 1 });
+  }));
+  return Array.from(found.values())
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "pt-BR", { sensitivity: "base" }))
+    .map((entry) => entry.label);
+};
 
 export default function ExplorarScreen() {
   const { theme, isLightMode } = useTheme();
@@ -268,9 +332,11 @@ export default function ExplorarScreen() {
   const latestRequest = useRef(0);
   const hasLoadedOnce = useRef(false);
   const [artistsError, setArtistsError] = useState("");
-  const [category, setCategory] = useState("Todos os artistas");
+  const [category, setCategory] = useState(ALL_CATEGORIES);
+  const [modality, setModality] = useState("todas");
+  const [serviceFilter, setServiceFilter] = useState(ALL_SERVICES);
   const [minPrice, setMinPrice] = useState("0");
-  const [maxPrice, setMaxPrice] = useState("5000");
+  const [maxPrice, setMaxPrice] = useState(""); // vazio = sem teto (vai até o maior preço cadastrado)
   const [ratingFilter, setRatingFilter] = useState(0);
   const [distance, setDistance] = useState(100);
   const [location, setLocation] = useState(ALL_LOCATIONS);
@@ -280,7 +346,7 @@ export default function ExplorarScreen() {
   const [ibgeCities, setIbgeCities] = useState<any[]>([]);
   const [selectedState, setSelectedState] = useState<any>(null);
   const [locationSearch, setLocationSearch] = useState("");
-  const [expandedFilters, setExpandedFilters] = useState<Record<string, boolean>>({ category: true, price: true, rating: true, location: true });
+  const [expandedFilters, setExpandedFilters] = useState<Record<string, boolean>>({ category: true, modality: true, service: true, price: true, rating: true, location: true });
   const [sort, setSort] = useState("rating");
   const [sortOpen, setSortOpen] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
@@ -411,32 +477,47 @@ export default function ExplorarScreen() {
     return () => { active = false; clearTimeout(timer); };
   }, [location, artists.length]);
 
+  // Opções de filtro derivadas dos dados reais dos artistas (nada fixo): novas categorias, serviços
+  // e preços cadastrados no Perfil aparecem aqui sozinhos quando a lista é carregada.
+  const categoryOptions = useMemo(
+    () => [ALL_CATEGORIES, ...buildCategoryOptions(artists.map((artist) => artist.categories))],
+    [artists],
+  );
+  const serviceOptions = useMemo(() => buildServiceOptions(artists), [artists]);
+  const sliderMax = useMemo(() => computeSliderMax(artists), [artists]);
+  // Se a opção escolhida deixou de existir (ex.: o artista removeu a categoria), volta para "todas".
+  const activeCategory = category === ALL_CATEGORIES || categoryOptions.some((option) => categoryKey(option) === categoryKey(category))
+    ? category : ALL_CATEGORIES;
+  const activeService = serviceFilter === ALL_SERVICES || serviceOptions.some((option) => categoryKey(option) === categoryKey(serviceFilter))
+    ? serviceFilter : ALL_SERVICES;
+
   const numericMin = Math.max(0, Number(minPrice.replace(/\D/g, "")) || 0);
   const numericMax = Math.min(
-    MAX_SLIDER_VAL,
-    Math.max(numericMin, Number(maxPrice.replace(/\D/g, "")) || MAX_SLIDER_VAL),
+    sliderMax,
+    Math.max(numericMin, Number(maxPrice.replace(/\D/g, "")) || sliderMax),
   );
 
-  const minPercent = Math.min(
-    100,
-    Math.max(0, (numericMin / MAX_SLIDER_VAL) * 100),
-  );
-  const maxPercent = Math.min(
-    100,
-    Math.max(0, (numericMax / MAX_SLIDER_VAL) * 100),
-  );
+  const minPercent = Math.min(100, Math.max(0, (numericMin / sliderMax) * 100));
+  const maxPercent = Math.min(100, Math.max(0, (numericMax / sliderMax) * 100));
+
+  // Os arrastos leem valores atuais por ref: o PanResponder é criado uma vez só e, sem isso,
+  // continuaria usando o teto e as posições do primeiro render.
+  const sliderMaxRef = useRef(sliderMax);
+  sliderMaxRef.current = sliderMax;
+  const percentRef = useRef({ min: minPercent, max: maxPercent });
+  percentRef.current = { min: minPercent, max: maxPercent };
+  const dragStartPx = useRef(0);
 
   const minPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => { dragStartPx.current = (percentRef.current.min / 100) * TRACK_WIDTH; },
       onPanResponderMove: (_, gestureState) => {
-        const currentPx = (minPercent / 100) * TRACK_WIDTH;
         const newPx = Math.min(
-          (maxPercent / 100) * TRACK_WIDTH,
-          Math.max(0, currentPx + gestureState.dx),
+          (percentRef.current.max / 100) * TRACK_WIDTH,
+          Math.max(0, dragStartPx.current + gestureState.dx),
         );
-        const newVal = Math.round((newPx / TRACK_WIDTH) * MAX_SLIDER_VAL);
-        setMinPrice(String(newVal));
+        setMinPrice(String(Math.round((newPx / TRACK_WIDTH) * sliderMaxRef.current)));
       },
     }),
   ).current;
@@ -444,17 +525,13 @@ export default function ExplorarScreen() {
   const maxPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => { dragStartPx.current = (percentRef.current.max / 100) * TRACK_WIDTH; },
       onPanResponderMove: (_, gestureState) => {
-        const currentPx = (maxPercent / 100) * TRACK_WIDTH;
         const newPx = Math.min(
           TRACK_WIDTH,
-          Math.max(
-            (minPercent / 100) * TRACK_WIDTH,
-            currentPx + gestureState.dx,
-          ),
+          Math.max((percentRef.current.min / 100) * TRACK_WIDTH, dragStartPx.current + gestureState.dx),
         );
-        const newVal = Math.round((newPx / TRACK_WIDTH) * MAX_SLIDER_VAL);
-        setMaxPrice(String(newVal));
+        setMaxPrice(String(Math.round((newPx / TRACK_WIDTH) * sliderMaxRef.current)));
       },
     }),
   ).current;
@@ -465,14 +542,21 @@ export default function ExplorarScreen() {
     const searchTerms = foldText(searchQuery).split(/\s+/).filter(Boolean);
     const result = artists.filter((artist) => {
       const matchesSearch = searchTerms.every((term) => artist.searchableText.includes(term));
+      // Categoria = nome real cadastrado no Perfil (principal ou "categorias e estilos").
       const matchesCategory =
-        category === "Todos os artistas" || artist.category === category;
-      const matchesPrice =
-        artist.price >= numericMin && artist.price <= numericMax;
+        activeCategory === ALL_CATEGORIES || artist.categoryKeys.includes(categoryKey(activeCategory));
+      const matchesModality = modality === "todas" || artist.modalities.includes(modality);
+      const matchesService =
+        activeService === ALL_SERVICES || artist.serviceTitles.some((title) => categoryKey(title) === categoryKey(activeService));
+      // Faixa de preço do artista (menor a maior serviço) cruzando com a faixa escolhida.
+      // Sem preço cadastrado ("a combinar"), só entra enquanto o mínimo do filtro for zero.
+      const matchesPrice = artist.price > 0
+        ? artist.priceMax >= numericMin && artist.price <= numericMax
+        : numericMin === 0;
       const matchesRating = ratingFilter === 0 || artist.rating >= ratingFilter;
       const matchesDistance = location === ALL_LOCATIONS || (Number.isFinite(artist.distanceKm) && artist.distanceKm <= distance);
       return (
-        matchesSearch && matchesCategory && matchesPrice && matchesRating && matchesDistance
+        matchesSearch && matchesCategory && matchesModality && matchesService && matchesPrice && matchesRating && matchesDistance
       );
     });
 
@@ -488,12 +572,14 @@ export default function ExplorarScreen() {
       // Ordena pelas avaliações reais retornadas pela API; perfis sem avaliação ficam no fim.
       return b.rating - a.rating;
     });
-  }, [artists, searchQuery, category, numericMin, numericMax, ratingFilter, distance, sort, location]);
+  }, [artists, searchQuery, activeCategory, modality, activeService, numericMin, numericMax, ratingFilter, distance, sort, location]);
 
   useEffect(() => {
     setVisibleCount(6);
   }, [
-    category,
+    activeCategory,
+    modality,
+    activeService,
     searchQuery,
     numericMin,
     numericMax,
@@ -538,9 +624,12 @@ export default function ExplorarScreen() {
   };
 
   const clearFilters = () => {
-    setCategory("Todos os artistas");
+    setCategory(ALL_CATEGORIES);
+    setModality("todas");
+    setServiceFilter(ALL_SERVICES);
+    setQuery(""); // "Limpar" restaura a listagem completa, inclusive a pesquisa digitada
     setMinPrice("0");
-    setMaxPrice("5000");
+    setMaxPrice("");
     setRatingFilter(0);
     setDistance(100);
     setLocation(ALL_LOCATIONS);
@@ -612,9 +701,10 @@ export default function ExplorarScreen() {
           <Text style={styles.filterSubTitle}>Categoria</Text>
           <View style={styles.expandButton}><Text style={styles.arrowIcon}>{expandedFilters.category ? "−" : "+"}</Text></View>
         </TouchableOpacity>
-        {expandedFilters.category && <>
-        {CATEGORY_OPTIONS.map((option) => {
-          const active = category === option;
+        {expandedFilters.category && (
+        <ScrollView style={styles.filterOptionsScroll} nestedScrollEnabled showsVerticalScrollIndicator>
+        {categoryOptions.map((option) => {
+          const active = activeCategory === option;
           return (
             <TouchableOpacity
               key={option}
@@ -625,15 +715,60 @@ export default function ExplorarScreen() {
                 {active ? "◉" : "◯"}
               </Text>
               <Text
-                style={active ? styles.filterLabelActive : styles.filterLabel}
+                style={[active ? styles.filterLabelActive : styles.filterLabel, { flexShrink: 1 }]}
               >
                 {option}
               </Text>
             </TouchableOpacity>
           );
         })}
-        </>}
+        </ScrollView>
+        )}
       </View>
+
+      <View style={styles.divider} />
+
+      <View style={styles.filterBlock}>
+        <TouchableOpacity style={styles.filterBlockHeader} onPress={() => setExpandedFilters((prev) => ({ ...prev, modality: !prev.modality }))} activeOpacity={0.75}>
+          <Text style={styles.filterSubTitle}>Modalidade de atendimento</Text>
+          <View style={styles.expandButton}><Text style={styles.arrowIcon}>{expandedFilters.modality ? "−" : "+"}</Text></View>
+        </TouchableOpacity>
+        {expandedFilters.modality && MODALITY_OPTIONS.map((option) => {
+          const active = modality === option.id;
+          return (
+            <TouchableOpacity key={option.id} style={styles.radioItem} onPress={() => setModality(option.id)}>
+              <Text style={active ? styles.radioActive : styles.radioInactive}>{active ? "◉" : "◯"}</Text>
+              <Text style={active ? styles.filterLabelActive : styles.filterLabel}>{option.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {serviceOptions.length > 0 && (
+        <>
+          <View style={styles.divider} />
+
+          <View style={styles.filterBlock}>
+            <TouchableOpacity style={styles.filterBlockHeader} onPress={() => setExpandedFilters((prev) => ({ ...prev, service: !prev.service }))} activeOpacity={0.75}>
+              <Text style={styles.filterSubTitle}>Serviços</Text>
+              <View style={styles.expandButton}><Text style={styles.arrowIcon}>{expandedFilters.service ? "−" : "+"}</Text></View>
+            </TouchableOpacity>
+            {expandedFilters.service && (
+              <ScrollView style={styles.filterOptionsScroll} nestedScrollEnabled showsVerticalScrollIndicator>
+                {[ALL_SERVICES, ...serviceOptions].map((option) => {
+                  const active = activeService === option;
+                  return (
+                    <TouchableOpacity key={option} style={styles.radioItem} onPress={() => setServiceFilter(option)}>
+                      <Text style={active ? styles.radioActive : styles.radioInactive}>{active ? "◉" : "◯"}</Text>
+                      <Text style={[active ? styles.filterLabelActive : styles.filterLabel, { flexShrink: 1 }]}>{option}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        </>
+      )}
 
       <View style={styles.divider} />
 
@@ -662,7 +797,7 @@ export default function ExplorarScreen() {
 
         <View style={styles.priceRow}>
           <Text style={styles.priceText}>R$ 0</Text>
-          <Text style={styles.priceText}>R$ 5.000</Text>
+          <Text style={styles.priceText}>{formatPrice(sliderMax)}</Text>
         </View>
         <View style={styles.priceInputs}>
           <View style={styles.priceInputBox}>
@@ -683,7 +818,7 @@ export default function ExplorarScreen() {
               onChangeText={setMaxPrice}
               keyboardType="numeric"
               style={styles.priceInput}
-              placeholder="5000"
+              placeholder={String(sliderMax)}
               placeholderTextColor={theme.textSecondary}
             />
           </View>
@@ -1226,6 +1361,7 @@ const getStyles = (theme: any) =>
       fontFamily: "serif",
     },
     clearFilters: { color: theme.accent, fontWeight: "600", fontSize: 14 },
+    filterOptionsScroll: { maxHeight: 240 },
     filterBlock: { marginBottom: 18 },
     filterBlockHeader: {
       flexDirection: "row",

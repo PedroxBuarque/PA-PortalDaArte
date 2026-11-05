@@ -1243,6 +1243,7 @@ def listar_artistas():
                 pa.biografia,
                 pa.anos_experiencia,
                 pa.modalidade_atendimento,
+                pa.categoria_atuacao,
                 pa.cidade_atendimento,
                 pa.estado_atendimento,
                 pa.nota_media,

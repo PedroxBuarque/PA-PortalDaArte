@@ -46,6 +46,7 @@ import Header from "../../../components/Header";
 import Sidebar from "../../../components/Sidebar";
 import { useTheme } from "../../../components/context/ThemeContext";
 
+import { PROFILE_CATEGORIES } from "../../../constants/artist-categories";
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 type PortfolioItem = {
@@ -72,14 +73,8 @@ type CustomLink = {
   url: string;
 };
 
-const FIXED_CATEGORIES = [
-  "Música • Violão e Voz",
-  "Música • Banda Completa",
-  "Música • DJ & Produção",
-  "Música • Acústico / MPB",
-  "Performance • Eventos e Casamentos",
-  "Outros • Artista Independente",
-];
+// Lista única compartilhada com o filtro de Descobrir (src/constants/artist-categories.ts).
+const FIXED_CATEGORIES = PROFILE_CATEGORIES;
 
 export default function IndexScreen() {
   const { theme, isLightMode } = useTheme();
