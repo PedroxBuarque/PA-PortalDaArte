@@ -1,113 +1,131 @@
-// import React from 'react';
-// import {
-//   StyleSheet,
-//   Text,
-//   View,
-//   SafeAreaView,
-//   StatusBar,
-//   ScrollView,
-//   Platform,
-// } from 'react-native';
-// import {
-  //   Music,
-  //   Headphones,
-  //   Mic,
-  // } from 'lucide-react-native';
-
-// import CardContratacao,
-  
-//   type Contratacao,
-  // } from '../../../components/contratacoes/CardContratacao';
-
-// // Importações dos Componentes e do Contexto
-// import Sidebar from '../../../components/Sidebar';
-// import Header from '../../../components/Header';
-// import { useTheme } from '../../../components/context/ThemeContext';
-
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import {
+  ActivityIndicator,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
   StyleSheet,
   View,
-  SafeAreaView,
-  StatusBar,
-  ScrollView,
-  Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Music } from 'lucide-react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 
-import CardContratacao from '../../../components/contratacoes/CardContratacao';
-import { CONTRATACOES_LIST } from '../../../components/contratacoes/contratacoesData';
-
-import Sidebar from '../../../components/Sidebar';
+import CardContratacao, { type Contratacao } from '../../../components/contratacoes/CardContratacao';
 import Header from '../../../components/Header';
+import Sidebar from '../../../components/Sidebar';
 import { useTheme } from '../../../components/context/ThemeContext';
-
-
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
-// Função auxiliar para definir as cores da etiqueta de status
-const getStatusStyles = (status: string) => {
-  switch (status) {
-    case 'Pendente':
-      return { backgroundColor: '#FFB957' }; // Laranja
-    case 'Confirmado':
-      return { backgroundColor: '#56BBDA' }; // Azul claro
-    case 'Concluido':
-      return { backgroundColor: '#80EF80' }; // Verde
-    default:
-      return { backgroundColor: '#BDBDBD' }; // Cinza padrão
-  }
-};
+import {
+  formatarDataProposta,
+  listarPropostas,
+  statusPropostaLabel,
+  type PropostaApi,
+} from '../../../services/contratacoes';
+
+function toCard(item: PropostaApi): Contratacao {
+  const nome = item.papel_atual === 'contratante' ? item.artista_nome : item.contratante_nome;
+  const papel = item.papel_atual === 'contratante' ? item.servico_titulo : `Solicitação de ${item.contratante_nome}`;
+  return {
+    id: String(item.id),
+    name: nome,
+    category: papel,
+    date: `Prazo: ${formatarDataProposta(item.prazo_estimado)}`,
+    location: item.local_ou_modalidade || 'Local a combinar',
+    status: statusPropostaLabel(item),
+    icon: Music,
+    darkBgColor: '#3D2218',
+    lightBgColor: '#FDE4D9',
+    iconColor: '#E05A10',
+  };
+}
 
 export default function ContratacoesScreen() {
   const router = useRouter();
   const { theme, isLightMode } = useTheme();
   const styles = getStyles(theme);
+  const [items, setItems] = useState<PropostaApi[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const carregar = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      setItems(await listarPropostas());
+    } catch (err: any) {
+      setError(err?.message || 'Não foi possível carregar as contratações.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void carregar();
+    }, [carregar])
+  );
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar 
-        barStyle={isLightMode ? "dark-content" : "light-content"} 
-        backgroundColor={theme.headerBg} 
+      <StatusBar
+        barStyle={isLightMode ? 'dark-content' : 'light-content'}
+        backgroundColor={theme.headerBg}
       />
 
       <View style={styles.dashboardContainer}>
-        
-        {/* Passamos 'contratacoes' para marcar o menu ativo correto na Sidebar */}
-        <Sidebar activeRoute="contratacoes" />
-
+        <Sidebar />
         <View style={styles.mainContent}>
           <Header />
-
-          <ScrollView 
+          <ScrollView
             style={styles.scrollView}
             contentContainerStyle={styles.scrollContentContainer}
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.contentWrapper}>
               <View style={styles.pageHeader}>
-                <Text style={styles.pageTitle}>Contratações</Text>
+                <Text style={styles.pageTitle} accessibilityRole="header">Contratações</Text>
+                <Text style={styles.pageSubtitle}>Solicitações enviadas e recebidas pela sua conta.</Text>
               </View>
 
-              
-              <View style={styles.cardsContainer}>
-                {CONTRATACOES_LIST.map((item) => (
-                  <CardContratacao
-                    key={item.id}
-                    item={item}
-                    onPress={() =>
-                      router.push({
-                        pathname: '/pages/contratacoes/detalhes',
-                        params: { id: item.id },
-                      })
-                    }
-                  />
-                ))}
-              </View>
-
-                      
+              {loading ? (
+                <View style={styles.stateBox} accessibilityLiveRegion="polite">
+                  <ActivityIndicator color={theme.accent} />
+                  <Text style={styles.stateText}>Carregando contratações...</Text>
+                </View>
+              ) : error ? (
+                <View style={styles.stateBox} accessibilityLiveRegion="polite">
+                  <Text style={styles.errorText}>{error}</Text>
+                  <Text style={styles.stateText} onPress={() => void carregar()} accessibilityRole="button">
+                    Tentar novamente
+                  </Text>
+                </View>
+              ) : items.length === 0 ? (
+                <View style={styles.stateBox}>
+                  <Text style={styles.emptyTitle}>Nenhuma contratação ainda</Text>
+                  <Text style={styles.stateText}>Abra o perfil de um artista e toque em Contratar para iniciar.</Text>
+                </View>
+              ) : (
+                <View style={styles.cardsContainer}>
+                  {items.map((item) => {
+                    const card = toCard(item);
+                    return (
+                      <CardContratacao
+                        key={card.id}
+                        item={card}
+                        onPress={() =>
+                          router.push({
+                            pathname: '/pages/contratacoes/detalhes',
+                            params: { id: card.id },
+                          })
+                        }
+                      />
+                    );
+                  })}
+                </View>
+              )}
             </View>
           </ScrollView>
-
         </View>
       </View>
     </SafeAreaView>
@@ -118,131 +136,31 @@ const getStyles = (theme: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.mainBg,
-    ...Platform.select({
-      web: {
-        height: '100vh',
-        overflow: 'hidden',
-      },
-    }),
+    ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }),
   },
-  dashboardContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: theme.mainBg,
-    ...Platform.select({
-      web: {
-        height: '100vh',
-        overflow: 'hidden',
-      },
-    }),
-  },
+  dashboardContainer: { flex: 1, flexDirection: 'row', backgroundColor: theme.mainBg },
   mainContent: {
     flex: 1,
     backgroundColor: theme.mainBg,
-    ...Platform.select({
-      web: {
-        height: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      },
-    }),
+    ...Platform.select({ web: { height: '100vh' as any, display: 'flex', flexDirection: 'column', overflow: 'hidden' } }),
   },
-  scrollView: {
-    flex: 1,
-    ...Platform.select({
-      web: {
-        scrollbarWidth: 'none', 
-        msOverflowStyle: 'none', 
-      },
-    }),
-  },
-  scrollContentContainer: {
-    flexGrow: 1,
-  },
-  contentWrapper: {
-    flex: 1,
-    paddingHorizontal: 32,
-    paddingTop: 3,
-    paddingBottom: 24,
-  },
-  pageHeader: {
-    marginBottom: 20,
-  },
-  pageTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: theme.textPrimary,
-  },
-  cardsContainer: {
-    gap: 14,
-    paddingBottom: 8,
-  },
-  card: {
+  scrollView: { flex: 1 },
+  scrollContentContainer: { flexGrow: 1 },
+  contentWrapper: { flex: 1, paddingHorizontal: 32, paddingTop: 20, paddingBottom: 24 },
+  pageHeader: { marginBottom: 20 },
+  pageTitle: { fontSize: 28, fontWeight: '700', color: theme.textPrimary },
+  pageSubtitle: { color: theme.textSecondary, fontSize: 13, marginTop: 6 },
+  cardsContainer: { gap: 14, paddingBottom: 8 },
+  stateBox: {
     backgroundColor: theme.cardBg,
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
     borderWidth: 1,
     borderColor: theme.borderColor,
-  },
-  cardLeftGroup: {
-    flexDirection: 'row',
+    borderRadius: 14,
+    padding: 28,
     alignItems: 'center',
+    gap: 10,
   },
-  avatarContainer: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  artistDetails: {
-    justifyContent: 'center',
-  },
-  nameCategoryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-    flexWrap: 'wrap',
-  },
-  artistName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: theme.textPrimary,
-    marginRight: 8,
-  },
-  artistCategory: {
-    fontSize: 12,
-    color: theme.textSecondary,
-    fontWeight: '500',
-  },
-  infoText: {
-    fontSize: 12,
-    color: theme.textSecondary,
-    marginTop: 2,
-  },
-  cardRightGroup: {
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-  },
-  statusBadge: {
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-  },
-  statusText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  }
+  stateText: { color: theme.textSecondary, fontSize: 13, textAlign: 'center' },
+  emptyTitle: { color: theme.textPrimary, fontSize: 16, fontWeight: '700' },
+  errorText: { color: '#B42318', fontSize: 13, fontWeight: '600', textAlign: 'center' },
 });

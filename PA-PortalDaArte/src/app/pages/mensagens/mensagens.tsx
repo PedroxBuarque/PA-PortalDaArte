@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View, TouchableOpacity, SafeAreaView, StatusBar, ScrollView, Platform, Alert, Image, Modal, Dimensions } from 'react-native';
 import { AccessibleTextInput as TextInput } from '../../../components/accessibility/AccessibleTextInput';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   Music,
   Headphones,
@@ -44,7 +44,18 @@ type ConversaUI = {
   iconColor: string;
   status: string;
   outroUsuarioId: number;
+  artistaId: number;
+  contratanteId: number;
+  podeContratar: boolean;
   fotoPerfil?: string | null;
+};
+
+type AnexoMensagem = {
+  uri: string;
+  type: 'image' | 'video';
+  name: string;
+  mimeType: string;
+  file?: File | Blob;
 };
 
 type Mensagem = {
@@ -58,6 +69,7 @@ type Mensagem = {
 };
 
 export default function MensagensScreen() {
+  const router = useRouter();
   const { theme, isLightMode } = useTheme();
   const styles = getStyles(theme) as any;
 
@@ -73,7 +85,7 @@ export default function MensagensScreen() {
   const [messageText, setMessageText] = useState('');
   const [messagesData, setMessagesData] = useState<Record<string, Mensagem[]>>({});
   const messagesScrollRef = useRef<ScrollView | null>(null);
-  const [midiaAnexada, setMidiaAnexada] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
+  const [midiaAnexada, setMidiaAnexada] = useState<AnexoMensagem | null>(null);
   
   // Estados de visualização e menus de mensagens
   const [midiaVisualizacao, setMidiaVisualizacao] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
@@ -115,6 +127,9 @@ export default function MensagensScreen() {
       iconColor: '#20B2AA',
       status: 'Conversa',
       outroUsuarioId: Number(item.outro_usuario_id),
+      artistaId: Number(item.artista_id),
+      contratanteId: Number(item.contratante_id),
+      podeContratar: Number(item.outro_usuario_id) === Number(item.artista_id),
       fotoPerfil: item.foto_perfil || null,
     };
   };
@@ -186,6 +201,8 @@ export default function MensagensScreen() {
             text: String(row.text ?? row.conteudo ?? ''),
             time: String(row.time || ''),
             criadoEm: row.criado_em || row.created_at || row.createdAt || null,
+            mediaUri: row.media_url || null,
+            mediaType: row.media_type === 'video' ? 'video' : row.media_type === 'image' ? 'image' : null,
           })),
         }));
         if (active) setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, unread: 0 } : c));
@@ -200,24 +217,25 @@ export default function MensagensScreen() {
 
   const handleSelecionarMidia = async () => {
     try {
-      const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
       const libraryPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-      if (cameraPerm.status !== 'granted' || libraryPerm.status !== 'granted') {
-        Alert.alert('Permissão necessária', 'Precisamos de permissão para acessar a câmera e a galeria.');
+      if (libraryPerm.status !== 'granted') {
+        Alert.alert('Permissão necessária', 'Precisamos de permissão para acessar suas fotos e vídeos.');
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.All,
-        allowsEditing: true,
-        quality: 0.8,
+        allowsEditing: false,
+        quality: 0.9,
       });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const arquivo = result.assets[0];
-        const tipoMidia = arquivo.type === 'video' ? 'video' : 'image';
-        setMidiaAnexada({ uri: arquivo.uri, type: tipoMidia });
+      if (!result.canceled && result.assets?.length) {
+        const arquivo: any = result.assets[0];
+        const tipoMidia: 'image' | 'video' = arquivo.type === 'video' ? 'video' : 'image';
+        const fallbackExt = tipoMidia === 'video' ? 'mp4' : 'jpg';
+        const name = arquivo.fileName || `mensagem-${Date.now()}.${fallbackExt}`;
+        const mimeType = arquivo.mimeType || (tipoMidia === 'video' ? 'video/mp4' : 'image/jpeg');
+        setMidiaAnexada({ uri: arquivo.uri, type: tipoMidia, name, mimeType, file: arquivo.file });
       }
     } catch (error) {
       console.error('Erro ao selecionar mídia:', error);
@@ -228,18 +246,33 @@ export default function MensagensScreen() {
   const handleSendMessage = async () => {
     const content = messageText.trim();
     if (!selectedId || (!content && !midiaAnexada)) return;
-    if (midiaAnexada) {
-      Alert.alert('Mídia não disponível', 'O banco de dados atual aceita mensagens de texto. Remova o anexo e envie sua mensagem em texto.');
-      return;
-    }
-    if (!content) return;
     try {
       const token = await getToken();
-      const response = await fetch(`${URL_API}/api/conversas/${selectedId}/mensagens`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conteudo: content }),
-      });
+      let response: Response;
+      if (midiaAnexada) {
+        const formData = new FormData();
+        formData.append('conteudo', content);
+        if (Platform.OS === 'web' && midiaAnexada.file) {
+          formData.append('arquivo', midiaAnexada.file as any, midiaAnexada.name);
+        } else {
+          formData.append('arquivo', {
+            uri: midiaAnexada.uri,
+            name: midiaAnexada.name,
+            type: midiaAnexada.mimeType,
+          } as any);
+        }
+        response = await fetch(`${URL_API}/api/conversas/${selectedId}/mensagens/arquivo`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+      } else {
+        response = await fetch(`${URL_API}/api/conversas/${selectedId}/mensagens`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conteudo: content }),
+        });
+      }
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || 'Não foi possível enviar a mensagem.');
       const row = payload.mensagem;
@@ -249,12 +282,15 @@ export default function MensagensScreen() {
         text: String(row.text ?? row.conteudo ?? content),
         time: String(row.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
         criadoEm: row.criado_em || new Date().toISOString(),
+        mediaUri: row.media_url || null,
+        mediaType: row.media_type === 'video' ? 'video' : row.media_type === 'image' ? 'image' : null,
       };
       setMessagesData((prev) => ({ ...prev, [selectedId]: [...(prev[selectedId] || []), novaMensagem] }));
-      // Rola somente após o envio bem-sucedido, não durante o carregamento inicial da conversa.
       setTimeout(() => messagesScrollRef.current?.scrollToEnd({ animated: true }), 100);
-      setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, lastMessage: content, time: novaMensagem.time } : c));
+      const preview = content || (novaMensagem.mediaType === 'video' ? '📎 Vídeo' : '📎 Imagem');
+      setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, lastMessage: preview, time: novaMensagem.time } : c));
       setMessageText('');
+      setMidiaAnexada(null);
       setRequestError('');
     } catch (error: any) {
       Alert.alert('Erro ao enviar', error?.message || 'Não foi possível enviar a mensagem.');
@@ -270,17 +306,27 @@ export default function MensagensScreen() {
     }
   };
 
-  const handleDeleteMessage = (msgId: string, fromMe: boolean) => {
+  const handleDeleteMessage = async (msgId: string, fromMe: boolean) => {
     if (!fromMe) {
       Alert.alert('Ação não permitida', 'Você só pode deletar as suas próprias mensagens.');
       return;
     }
-
-    setMessagesData((prev) => ({
-      ...prev,
-      [selectedId]: (prev[selectedId] || []).filter((m) => m.id !== msgId),
-    }));
-    setActiveMenuMessageId(null);
+    try {
+      const token = await getToken();
+      const response = await fetch(`${URL_API}/api/conversas/${selectedId}/mensagens/${msgId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Não foi possível excluir a mensagem.');
+      setMessagesData((prev) => ({
+        ...prev,
+        [selectedId]: (prev[selectedId] || []).filter((m) => m.id !== msgId),
+      }));
+      setActiveMenuMessageId(null);
+    } catch (error: any) {
+      Alert.alert('Erro', error?.message || 'Não foi possível excluir a mensagem.');
+    }
   };
 
   return (
@@ -290,7 +336,7 @@ export default function MensagensScreen() {
         backgroundColor={theme.headerBg}
       />
       <View style={styles.dashboardContainer}>
-        <Sidebar activeRoute="mensagens" />
+        <Sidebar />
 
         <View style={styles.mainContent}>
           <Header />
@@ -392,10 +438,17 @@ export default function MensagensScreen() {
                       </View>
                     </View>
 
-                    <TouchableOpacity style={styles.btnConfirm} activeOpacity={0.85} onPress={() => Alert.alert("Contratação", "O fluxo de contratação ainda precisa ser conectado à API de propostas.")}
-                      accessibilityRole="button">
-                      <Text style={styles.btnConfirmText}>Confirmar Contratação</Text>
-                    </TouchableOpacity>
+                    {selectedConversation.podeContratar ? (
+                      <TouchableOpacity
+                        style={styles.btnConfirm}
+                        activeOpacity={0.85}
+                        onPress={() => router.push({ pathname: '/pages/contratacoes/Contratar', params: { id: String(selectedConversation.artistaId) } } as any)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Contratar ${selectedConversation.name}`}
+                      >
+                        <Text style={styles.btnConfirmText}>Confirmar Contratação</Text>
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
 
                   <ScrollView
@@ -505,6 +558,7 @@ export default function MensagensScreen() {
                                 onPress={() => setMidiaVisualizacao({ uri: msg.mediaUri!, type: msg.mediaType || 'image' })}
                                 style={styles.mediaPreviewWrapper}
                                 accessibilityRole="button"
+                                accessibilityLabel={msg.mediaType === 'video' ? 'Abrir vídeo da mensagem' : 'Abrir imagem da mensagem'}
                               >
                                 {msg.mediaType === 'video' ? (
                                   <View style={styles.videoThumbnailContainer}>
@@ -577,24 +631,7 @@ export default function MensagensScreen() {
                       maxLength={LIMITE_CARACTERES}
                       textAlignVertical="top"
                       onKeyPress={handleKeyPress}
-                      accessibilityLabel={String(midiaAnexada && (
-                    <View style={styles.anexoAviso}>
-                      <View style={styles.previewAnexoContainer}>
-                        {midiaAnexada.type === 'video' ? (
-                          <View style={styles.miniVideoBox}><Play size={16} color="#FFF" /></View>
-                        ) : (
-                          <Image source={{ uri: midiaAnexada.uri }} style={styles.miniImagePreview}
-                            accessible={false} />
-                        )}
-                        <Text style={styles.anexoAvisoTexto} numberOfLines={1}>Mídia pronta para envio</Text>
-                      </View>
-                      <TouchableOpacity onPress={() => setMidiaAnexada(null)}
-                        accessibilityRole="button"
-                        accessibilityLabel={"Remover mídia anexada"}>
-                        <X size={18} color="#E05A10" />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
+                      accessibilityLabel="Campo de mensagem"
                     />
 
                     <TouchableOpacity 
@@ -696,19 +733,19 @@ const getStyles = (theme: any) =>
     container: {
       flex: 1,
       backgroundColor: theme.mainBg,
-      ...Platform.select({ web: { height: '100vh', overflow: 'hidden' } }),
+      ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }),
     },
     dashboardContainer: {
       flex: 1,
       flexDirection: 'row',
       backgroundColor: theme.mainBg,
-      ...Platform.select({ web: { height: '100vh', overflow: 'hidden' } }),
+      ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }),
     },
     mainContent: {
       flex: 1,
       backgroundColor: theme.mainBg,
       ...Platform.select({
-        web: { height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+        web: { height: '100vh' as any, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
       }),
     },
     messagesLayout: {

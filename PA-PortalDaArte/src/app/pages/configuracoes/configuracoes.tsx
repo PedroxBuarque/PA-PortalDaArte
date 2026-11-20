@@ -237,7 +237,7 @@ const getStyles = (theme: any, compact: boolean) =>
     container: {
       flex: 1,
       backgroundColor: theme.mainBg,
-      ...Platform.select({ web: { height: '100vh', overflow: 'hidden' } }),
+      ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }),
     },
     dashboardContainer: { flex: 1, flexDirection: 'row', backgroundColor: theme.mainBg },
     mainContent: { flex: 1, minWidth: 0, backgroundColor: theme.mainBg },

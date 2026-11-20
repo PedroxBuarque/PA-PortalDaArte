@@ -1,12 +1,42 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
-import { Platform } from "react-native";
-
-// O erro estava aqui: removido o <any> para ficar apenas createContext(null)
-const ProfileContext = createContext(null);
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { createContext, useContext, useEffect, useState, type PropsWithChildren } from "react";
 
 const STORAGE_KEY = "pa-portal-da-arte-profile";
 
-const DEFAULT_PROFILE = {
+type ProfileState = {
+  profileImage: string | null;
+  profileName: string;
+  location: string;
+  profileCategory: string;
+  bio: string;
+  email: string;
+  password: string;
+  docType: string;
+  docNumber: string;
+  state: string;
+  city: string;
+};
+
+type RegistrationInput = {
+  email: string;
+  fullName: string;
+  password: string;
+  docType: string;
+  docNumber: string;
+  state: string;
+  city: string;
+};
+
+type ProfileContextValue = ProfileState & {
+  saveProfileImage: (uri: string | null) => Promise<void>;
+  updateProfile: (changes: Partial<ProfileState>) => void;
+  saveRegistration: (input: RegistrationInput) => void;
+  resetPassword: (newPassword: string) => void;
+};
+
+const ProfileContext = createContext<ProfileContextValue | null>(null);
+
+const DEFAULT_PROFILE: ProfileState = {
   profileImage: null,
   profileName: "Clara Mendonça",
   location: "Caruaru, PE",
@@ -20,39 +50,37 @@ const DEFAULT_PROFILE = {
   city: "",
 };
 
-export function ProfileProvider({ children }) {
-  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+export function ProfileProvider({ children }: PropsWithChildren) {
+  const [profile, setProfile] = useState<ProfileState>(DEFAULT_PROFILE);
 
   useEffect(() => {
+    let active = true;
+
     const loadProfile = async () => {
       try {
-        if (Platform.OS === "web") {
-          const saved = window.localStorage.getItem(STORAGE_KEY);
-          if (saved) {
-            setProfile({ ...DEFAULT_PROFILE, ...JSON.parse(saved) });
-          }
-        }
+        const saved = await AsyncStorage.getItem(STORAGE_KEY);
+        if (!active || !saved) return;
+        const parsed = JSON.parse(saved) as Partial<ProfileState>;
+        setProfile({ ...DEFAULT_PROFILE, ...parsed });
       } catch (error) {
         console.error("Erro ao carregar dados do perfil:", error);
       }
     };
 
-    loadProfile();
+    void loadProfile();
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const persistProfile = (nextProfile) => {
+  const persistProfile = (nextProfile: ProfileState) => {
     setProfile(nextProfile);
-
-    try {
-      if (Platform.OS === "web") {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextProfile));
-      }
-    } catch (error) {
+    void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextProfile)).catch((error) => {
       console.error("Erro ao salvar dados do perfil:", error);
-    }
+    });
   };
 
-  const updateProfile = (changes) => {
+  const updateProfile = (changes: Partial<ProfileState>) => {
     persistProfile({ ...profile, ...changes });
   };
 
@@ -64,7 +92,7 @@ export function ProfileProvider({ children }) {
     docNumber,
     state,
     city,
-  }) => {
+  }: RegistrationInput) => {
     persistProfile({
       ...profile,
       email: email.trim().toLowerCase(),
@@ -78,11 +106,11 @@ export function ProfileProvider({ children }) {
     });
   };
 
-  const saveProfileImage = async (uri) => {
+  const saveProfileImage = async (uri: string | null) => {
     persistProfile({ ...profile, profileImage: uri || null });
   };
 
-  const resetPassword = (newPassword) => {
+  const resetPassword = (newPassword: string) => {
     persistProfile({ ...profile, password: newPassword });
   };
 
@@ -101,7 +129,7 @@ export function ProfileProvider({ children }) {
   );
 }
 
-export function useProfile() {
+export function useProfile(): ProfileContextValue {
   const context = useContext(ProfileContext);
 
   if (!context) {

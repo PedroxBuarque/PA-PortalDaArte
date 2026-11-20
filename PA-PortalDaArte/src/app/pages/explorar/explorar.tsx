@@ -634,7 +634,8 @@ export default function ExplorarScreen() {
           style={styles.cardHeart}
           onPress={() => toggleFavorite(item)}
           accessibilityRole="button"
-          accessibilityLabel={isFav ? `Remover ${item.name} dos favoritos` : `Adicionar ${item.name} aos favoritos`} accessibilityState={{ checked: isFav }}
+          accessibilityLabel={isFav ? `Remover ${item.name} dos favoritos` : `Adicionar ${item.name} aos favoritos`}
+          accessibilityState={{ checked: isFav }}
         >
           <Text style={isFav ? styles.heartIconActive : styles.heartIcon}>
             {isFav ? "♥" : "♡"}
@@ -1488,7 +1489,7 @@ const getStyles = (theme: any) =>
       fontSize: 12,
       paddingVertical: 0,
       textAlign: "center",
-      ...Platform.select({ web: { outlineStyle: "none" } }),
+      ...Platform.select({ web: { outlineStyle: "none" as any } }),
     },
     locationInputBox: {
       flexDirection: "row",
@@ -1505,7 +1506,7 @@ const getStyles = (theme: any) =>
       flex: 1,
       fontSize: 13,
       color: theme.textPrimary,
-      ...Platform.select({ web: { outlineStyle: "none" } }),
+      ...Platform.select({ web: { outlineStyle: "none" as any } }),
     },
     distanceLabel: {
       color: theme.textSecondary,

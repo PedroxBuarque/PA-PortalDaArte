@@ -6,10 +6,16 @@ import { Lock } from "lucide-react-native";
 import { buildLoginHref, sanitizeRedirect } from "../../../constants/auth-routes";
 
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
+import { useAccessibility } from '../../../components/accessibility/AccessibilityContext';
+import { useTheme } from '../../../components/context/ThemeContext';
 const DOC_TYPES = ["CPF", "CNPJ", "MEI"];
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export default function RegisterScreen() {
+  const { theme } = useTheme();
+  const { highContrast } = useAccessibility();
+  const styles = getStyles(theme, highContrast);
+
   // O cadastro não faz login automático: o destino pretendido segue junto até o login.
   const params = useLocalSearchParams<{ redirect?: string | string[] }>();
   const redirect = sanitizeRedirect(params.redirect);
@@ -175,7 +181,7 @@ export default function RegisterScreen() {
 
             {isLoading ? (
               <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#E15743" />
+                <ActivityIndicator size="large" color={highContrast ? theme.accent : "#E15743"} />
                 <Text style={styles.loadingText}>Carregando cidades...</Text>
               </View>
             ) : data.length === 0 ? (
@@ -238,7 +244,7 @@ export default function RegisterScreen() {
                     if (error) setError("");
                   }}
                   placeholder="nome@email.com"
-                  placeholderTextColor="#9D8E85"
+                  placeholderTextColor={highContrast ? theme.textSecondary : "#9D8E85"}
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -256,7 +262,7 @@ export default function RegisterScreen() {
                     if (error) setError("");
                   }}
                   placeholder="Digite seu nome completo"
-                  placeholderTextColor="#9D8E85"
+                  placeholderTextColor={highContrast ? theme.textSecondary : "#9D8E85"}
                   autoCapitalize="words"
                   style={styles.input}
                   accessibilityLabel={"Nome completo"}
@@ -266,7 +272,7 @@ export default function RegisterScreen() {
 
             <Text style={styles.label}>Senha</Text>
             <View style={styles.passwordContainer}>
-              <Lock size={16} color="#9D8E85" style={styles.lockIcon} />
+              <Lock size={16} color={highContrast ? theme.textSecondary : "#9D8E85"} style={styles.lockIcon} />
               <TextInput
                 value={password}
                 onChangeText={(value) => {
@@ -274,7 +280,7 @@ export default function RegisterScreen() {
                   if (error) setError("");
                 }}
                 placeholder="••••••••"
-                placeholderTextColor="#9D8E85"
+                placeholderTextColor={highContrast ? theme.textSecondary : "#9D8E85"}
                 secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -314,12 +320,12 @@ export default function RegisterScreen() {
                   placeholder={
                     docType === "CPF" ? "000.000.000-00" : "00.000.000/0000-00"
                   }
-                  placeholderTextColor="#9D8E85"
+                  placeholderTextColor={highContrast ? theme.textSecondary : "#9D8E85"}
                   keyboardType="numeric"
                   editable={!!docType}
                   style={[
                     styles.input,
-                    !docType && { backgroundColor: "#F9F1EC" },
+                    !docType && { backgroundColor: highContrast ? theme.searchBg : "#F9F1EC" },
                   ]}
                   accessibilityLabel={String(docType === "CPF"
                     ? "CPF"
@@ -352,7 +358,7 @@ export default function RegisterScreen() {
                 <TouchableOpacity
                   style={[
                     styles.selectInput,
-                    !state && { backgroundColor: "#F9F1EC" },
+                    !state && { backgroundColor: highContrast ? theme.searchBg : "#F9F1EC" },
                   ]}
                   activeOpacity={0.7}
                   onPress={() => {
@@ -421,12 +427,12 @@ export default function RegisterScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#FFF1E6" },
+const getStyles = (theme: any, highContrast: boolean) => StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: highContrast ? theme.mainBg : "#FFF1E6" },
   container: {
     flex: 1,
-    backgroundColor: "#FFF1E6",
-    ...Platform.select({ web: { minHeight: "100vh", overflow: "hidden" } }),
+    backgroundColor: highContrast ? theme.mainBg : "#FFF1E6",
+    ...Platform.select({ web: { minHeight: "100vh" as any, overflow: "hidden" } }),
   },
   scrollContainer: {
     flexGrow: 1,
@@ -439,7 +445,7 @@ const styles = StyleSheet.create({
     width: 320,
     height: 320,
     borderRadius: 160,
-    backgroundColor: "#FFE9D2",
+    backgroundColor: highContrast ? "transparent" : "#FFE9D2",
     top: -100,
     left: -80,
   },
@@ -448,7 +454,7 @@ const styles = StyleSheet.create({
     width: 380,
     height: 380,
     borderRadius: 190,
-    backgroundColor: "#F9DDD0",
+    backgroundColor: highContrast ? "transparent" : "#F9DDD0",
     top: -40,
     right: -60,
   },
@@ -457,27 +463,29 @@ const styles = StyleSheet.create({
     width: 320,
     height: 320,
     borderRadius: 160,
-    backgroundColor: "#F9DDD0",
+    backgroundColor: highContrast ? "transparent" : "#F9DDD0",
     bottom: -100,
     right: -80,
   },
   registerCard: {
     width: "100%",
     maxWidth: 520,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: highContrast ? theme.cardBg : "#FFFFFF",
+    borderWidth: highContrast ? 2 : 0,
+    borderColor: highContrast ? theme.borderColor : "transparent",
     borderRadius: 24,
     paddingTop: 40,
     paddingBottom: 36,
     paddingHorizontal: 36,
-    shadowColor: "#6D4D3E",
+    shadowColor: highContrast ? "#000000" : "#6D4D3E",
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.1,
+    shadowOpacity: highContrast ? 0 : 0.1,
     shadowRadius: 25,
     elevation: 8,
     zIndex: 10,
   },
   title: {
-    color: "#3D261D",
+    color: highContrast ? theme.textPrimary : "#3D261D",
     fontSize: 28,
     fontWeight: "900",
     textAlign: "center",
@@ -485,7 +493,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   subtitle: {
-    color: "#8C7A70",
+    color: highContrast ? theme.textSecondary : "#8C7A70",
     fontSize: 13,
     lineHeight: 18,
     textAlign: "center",
@@ -493,37 +501,37 @@ const styles = StyleSheet.create({
   },
   rowInputs: { flexDirection: "row", justifyContent: "space-between", gap: 16 },
   halfInputBox: { flex: 1 },
-  label: { color: "#3D261D", fontSize: 13, fontWeight: "700", marginBottom: 8 },
+  label: { color: highContrast ? theme.textPrimary : "#3D261D", fontSize: 13, fontWeight: "700", marginBottom: 8 },
   input: {
     height: 50,
     borderWidth: 1,
-    borderColor: "#F0E3DA",
+    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
     borderRadius: 12,
-    backgroundColor: "#FFFBF8",
+    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
     paddingHorizontal: 16,
-    color: "#3D261D",
+    color: highContrast ? theme.textPrimary : "#3D261D",
     fontSize: 14,
     marginBottom: 16,
-    ...Platform.select({ web: { outlineStyle: "none" } }),
+    ...Platform.select({ web: { outlineStyle: "none" as any } }),
   },
   selectInput: {
     height: 50,
     borderWidth: 1,
-    borderColor: "#F0E3DA",
+    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
     borderRadius: 12,
-    backgroundColor: "#FFFBF8",
+    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
     paddingHorizontal: 16,
     justifyContent: "center",
     marginBottom: 16,
   },
-  placeholderText: { color: "#9D8E85", fontSize: 14 },
-  selectText: { color: "#3D261D", fontSize: 14 },
+  placeholderText: { color: highContrast ? theme.textSecondary : "#9D8E85", fontSize: 14 },
+  selectText: { color: highContrast ? theme.textPrimary : "#3D261D", fontSize: 14 },
   passwordContainer: {
     height: 50,
     borderWidth: 1,
-    borderColor: "#F0E3DA",
+    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
     borderRadius: 12,
-    backgroundColor: "#FFFBF8",
+    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
@@ -533,14 +541,14 @@ const styles = StyleSheet.create({
   passwordInput: {
     flex: 1,
     height: 48,
-    color: "#3D261D",
+    color: highContrast ? theme.textPrimary : "#3D261D",
     fontSize: 14,
     paddingVertical: 0,
     paddingHorizontal: 0,
-    ...Platform.select({ web: { outlineStyle: "none" } }),
+    ...Platform.select({ web: { outlineStyle: "none" as any } }),
   },
   errorText: {
-    color: "#C53B2C",
+    color: highContrast ? "#B00020" : "#C53B2C",
     fontSize: 12,
     marginTop: 2,
     marginBottom: 12,
@@ -549,12 +557,12 @@ const styles = StyleSheet.create({
   registerButton: {
     height: 52,
     borderRadius: 12,
-    backgroundColor: "#E15743",
+    backgroundColor: highContrast ? theme.accent : "#E15743",
     justifyContent: "center",
     alignItems: "center",
     marginTop: 10,
     marginBottom: 20,
-    shadowColor: "#E15743",
+    shadowColor: highContrast ? theme.accent : "#E15743",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,
@@ -566,9 +574,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  footerText: { color: "#8C7A70", fontSize: 13 },
+  footerText: { color: highContrast ? theme.textSecondary : "#8C7A70", fontSize: 13 },
   footerLink: {
-    color: "#E15743",
+    color: highContrast ? theme.accent : "#E15743",
     fontSize: 13,
     fontWeight: "700",
     marginLeft: 6,
@@ -583,7 +591,9 @@ const styles = StyleSheet.create({
   modalContent: {
     width: "100%",
     maxWidth: 350,
-    backgroundColor: "#FFF",
+    backgroundColor: highContrast ? theme.cardBg : "#FFF",
+    borderWidth: highContrast ? 2 : 0,
+    borderColor: highContrast ? theme.borderColor : "transparent",
     borderRadius: 20,
     padding: 24,
     shadowColor: "#000",
@@ -595,17 +605,17 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#3D261D",
+    color: highContrast ? theme.textPrimary : "#3D261D",
     marginBottom: 16,
     textAlign: "center",
   },
   modalOption: {
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0E3DA",
+    borderBottomColor: highContrast ? theme.borderColor : "#F0E3DA",
   },
-  modalOptionText: { fontSize: 15, color: "#3D261D", textAlign: "center" },
-  modalEmpty: { color: "#9D8E85", textAlign: "center", paddingVertical: 20 },
+  modalOptionText: { fontSize: 15, color: highContrast ? theme.textPrimary : "#3D261D", textAlign: "center" },
+  modalEmpty: { color: highContrast ? theme.textSecondary : "#9D8E85", textAlign: "center", paddingVertical: 20 },
   loadingContainer: { alignItems: "center", paddingVertical: 30 },
-  loadingText: { color: "#9D8E85", marginTop: 12, fontSize: 14 },
+  loadingText: { color: highContrast ? theme.textSecondary : "#9D8E85", marginTop: 12, fontSize: 14 },
 });

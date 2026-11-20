@@ -105,7 +105,7 @@ export default function IndexScreen() {
       />
 
       <View style={styles.dashboardContainer}>
-        <Sidebar activeRoute="favoritos" />
+        <Sidebar />
 
         <View style={styles.mainContent}>
           <Header />
@@ -198,8 +198,8 @@ export default function IndexScreen() {
   activeOpacity={0.8}
   onPress={() =>
     router.push({
-      pathname: "pages/contratacoes/Contratar",
-      params: { id: String(item.id), name: item.name },
+      pathname: "/pages/contratacoes/Contratar",
+      params: { id: String(item.id) },
     } as any)
   }
   accessibilityLabel={`Contratar ${item.name}`}
@@ -234,14 +234,14 @@ export default function IndexScreen() {
   );
 }
 
-const getStyles = (theme) =>
+const getStyles = (theme: any) =>
   StyleSheet.create({
     container: {
       flex: 1,
       backgroundColor: theme.mainBg,
       ...(Platform.select({
         web: {
-          height: "100vh",
+          height: "100vh" as any,
           overflow: "hidden",
         },
       }) as any),
@@ -252,7 +252,7 @@ const getStyles = (theme) =>
       backgroundColor: theme.mainBg,
       ...(Platform.select({
         web: {
-          height: "100vh",
+          height: "100vh" as any,
           overflow: "hidden",
         },
       }) as any),
@@ -262,7 +262,7 @@ const getStyles = (theme) =>
       backgroundColor: theme.mainBg,
       ...(Platform.select({
         web: {
-          height: "100vh",
+          height: "100vh" as any,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",

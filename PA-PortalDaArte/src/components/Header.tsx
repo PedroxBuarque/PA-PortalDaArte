@@ -6,7 +6,7 @@ import { useTheme } from './context/ThemeContext';
 import { useWindowDimensions } from 'react-native';
 import { useAuth } from './context/AuthContext';
 import { useSearch } from './context/SearchContext';
-import { buildLoginHref, DISCOVER_ROUTE, normalizePath } from '../constants/auth-routes';
+import { buildLoginHref, DISCOVER_ROUTE, normalizePath, SETTINGS_ROUTE } from '../constants/auth-routes';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, usePathname } from 'expo-router';
 
@@ -27,7 +27,7 @@ export default function Header() {
   // Sem sessão não há Sidebar (onde fica a marca), então o Header mostra a logo à esquerda.
   const showBrand = status !== 'authenticated';
   const compact = useWindowDimensions().width < 900;
-  const [profileImage, setProfileImage] = useState(null);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
   const pathname = usePathname();
   const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://10.0.0.142:8000";
 
@@ -327,7 +327,7 @@ export default function Header() {
               style={styles.dropdownItem} 
               onPress={() => {
                 setIsMenuVisible(false);
-                router.push('/pages/configuracoes/configuracoes' as any);
+                router.push(SETTINGS_ROUTE as any);
               }}
               accessibilityRole="button"
               accessibilityLabel="Abrir configurações"

@@ -12,7 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { ArrowLeft, FileText, MapPin, MessageCircle, Music, Star, X } from "lucide-react-native";
+import { ArrowLeft, FileText, Handshake, MapPin, MessageCircle, Music, Star, X } from "lucide-react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { ResizeMode, Video } from "expo-av";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -109,6 +109,21 @@ export default function PerfilPublicoScreen() {
     return () => { active = false; };
   }, [artistId, closeViewer]);
 
+  const handleHire = async () => {
+    try {
+      const token = await AsyncStorage.getItem("access_token");
+      if (!token) {
+        Alert.alert("Entre na sua conta", "Faça login para contratar este artista.");
+        return;
+      }
+      const id = String(artist?.id || artist?.usuario_id || artist?.artista_id || artistId || "");
+      if (!id) throw new Error();
+      router.push({ pathname: "/pages/contratacoes/Contratar", params: { id } } as any);
+    } catch {
+      Alert.alert("Erro", "Não foi possível abrir a contratação.");
+    }
+  };
+
   const handleSendMessage = async () => {
     try {
       const token = await AsyncStorage.getItem("access_token");
@@ -197,11 +212,18 @@ export default function PerfilPublicoScreen() {
                       </View>
                     </View>
                   </View>
-                  <TouchableOpacity style={styles.messageButton} onPress={handleSendMessage} activeOpacity={0.85}
-                    accessibilityRole="button">
-                    <MessageCircle size={18} color="#FFFFFF" />
-                    <Text style={styles.messageButtonText}>Enviar mensagem</Text>
-                  </TouchableOpacity>
+                  <View style={styles.heroActions}>
+                    <TouchableOpacity style={styles.messageButton} onPress={handleSendMessage} activeOpacity={0.85}
+                      accessibilityRole="button" accessibilityLabel={`Enviar mensagem para ${name}`}>
+                      <MessageCircle size={18} color="#FFFFFF" accessible={false} />
+                      <Text style={styles.messageButtonText}>Enviar mensagem</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.hireButton} onPress={handleHire} activeOpacity={0.85}
+                      accessibilityRole="button" accessibilityLabel={`Contratar ${name}`}>
+                      <Handshake size={18} color={theme.accent} accessible={false} />
+                      <Text style={styles.hireButtonText}>Contratar</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <View style={styles.sectionCard}>
@@ -493,8 +515,11 @@ const getStyles = (theme: any) => StyleSheet.create({
   ratingRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   ratingText: { color: theme.textPrimary, fontSize: 13, fontWeight: "700" },
   reviewText: { color: theme.textSecondary, fontSize: 12 },
+  heroActions: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   messageButton: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 9, backgroundColor: theme.accent, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 12 },
   messageButtonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
+  hireButton: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 9, backgroundColor: theme.cardBg, borderWidth: 1.5, borderColor: theme.accent, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 11 },
+  hireButtonText: { color: theme.accent, fontSize: 14, fontWeight: "800" },
   sectionCard: { backgroundColor: theme.cardBg, borderColor: theme.borderColor, borderWidth: 1, borderRadius: 16, padding: 22, gap: 14 },
   sectionTitle: { color: theme.textPrimary, fontSize: 18, fontWeight: "800" },
   bodyText: { color: theme.textSecondary, fontSize: 14, lineHeight: 22 },
