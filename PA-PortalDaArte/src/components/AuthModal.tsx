@@ -1,9 +1,10 @@
 import React, { useEffect } from "react";
-import { Modal, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Modal, Platform, StyleSheet, TouchableOpacity, View } from "react-native";
 import { usePathname, useRouter } from "expo-router";
 import { useTheme } from "./context/ThemeContext";
 import { closeAuthModal, useAuthModal } from "./context/AuthContext";
 import { buildLoginHref, buildRegisterHref } from "../constants/auth-routes";
+import BrandMark from "./BrandMark";
 
 import { VLibrasText as Text } from './accessibility/VLibrasText';
 export const AUTH_MODAL_MESSAGE =
@@ -43,7 +44,9 @@ export default function AuthModal() {
       >
         {/* O toque dentro do cartão não fecha o modal */}
         <TouchableOpacity activeOpacity={1} style={styles.card} testID="auth-modal-card" accessibilityViewIsModal>
-          <Text style={styles.title} accessibilityRole="header">Entre no Portal da Arte</Text>
+          <View style={styles.brandWrap} accessible={false}><BrandMark showTagline={false} /></View>
+          <Text style={styles.eyebrow}>CONTINUE SUA EXPERIÊNCIA</Text>
+          <Text style={styles.title} accessibilityRole="header">Sua próxima conexão começa aqui.</Text>
           <Text style={styles.message}>{AUTH_MODAL_MESSAGE}</Text>
 
           <TouchableOpacity
@@ -81,7 +84,7 @@ const getStyles = (theme: any) =>
   StyleSheet.create({
     overlay: {
       flex: 1,
-      backgroundColor: "rgba(0,0,0,0.55)",
+      backgroundColor: theme.overlay || "rgba(0,0,0,0.6)",
       alignItems: "center",
       justifyContent: "center",
       padding: 20,
@@ -90,14 +93,19 @@ const getStyles = (theme: any) =>
       width: "100%",
       maxWidth: 420,
       backgroundColor: theme.cardBg,
-      borderRadius: 20,
+      borderRadius: 28,
       borderWidth: 1,
       borderColor: theme.borderColor,
-      padding: 28,
+      padding: 30,
+      borderTopWidth: 4,
+      borderTopColor: theme.accent,
+      ...Platform.select({ web: { boxShadow: `0 24px 60px ${theme.shadowStrong || theme.shadowColor}` } }),
     },
+    brandWrap: { alignItems: "center", marginBottom: 18 },
+    eyebrow: { color: theme.accent, fontSize: 9, fontWeight: "900", letterSpacing: 1.5, textAlign: "center", marginBottom: 6 },
     title: {
       color: theme.textPrimary,
-      fontSize: 22,
+      fontSize: 25,
       fontWeight: "900",
       fontFamily: "serif",
       textAlign: "center",
@@ -112,7 +120,7 @@ const getStyles = (theme: any) =>
     },
     primaryButton: {
       backgroundColor: theme.accent,
-      borderRadius: 30,
+      borderRadius: 16,
       paddingVertical: 13,
       alignItems: "center",
       marginBottom: 10,
@@ -121,7 +129,7 @@ const getStyles = (theme: any) =>
     secondaryButton: {
       borderWidth: 1.5,
       borderColor: theme.accent,
-      borderRadius: 30,
+      borderRadius: 16,
       paddingVertical: 12,
       alignItems: "center",
     },

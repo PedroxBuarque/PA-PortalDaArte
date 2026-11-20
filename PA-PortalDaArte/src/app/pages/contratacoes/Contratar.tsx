@@ -18,6 +18,11 @@ interface Theme {
   sidebarBg: string;
   menuActiveBg: string;
   accent: string;
+  onAccent?: string;
+  heroBg?: string;
+  heroText?: string;
+  heroMuted?: string;
+  artGold?: string;
   headerBg: string;
   mainBg: string;
   searchBg: string;
@@ -443,6 +448,8 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
   const podeNegociar = artista?.aceitaNegociar === true || valorBase <= 0;
 
   const { width } = useWindowDimensions();
+  const showSidebar = width >= 900;
+  const narrow = width < 620;
   const twoCols = width >= 700; // formulário em 2 colunas
 
   const [form, setForm] = useState<FormState>(FORM_INICIAL);
@@ -806,11 +813,11 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
   if (carregandoArtista) {
     return (
       <View style={[styles.root, { backgroundColor: theme.mainBg }]}>
-        <Sidebar />
+        {showSidebar ? <Sidebar /> : null}
         <View style={{ flex: 1 }}>
           <Header />
           <View style={{ padding: 24, gap: 12 }}>
-            <Text style={[styles.title, { color: theme.textPrimary }]}>Carregando artista...</Text>
+            <Text style={[styles.title, { color: theme.heroText || theme.textPrimary }]}>Carregando artista...</Text>
             <Text style={[styles.hint, { color: theme.textSecondary }]}>Aguarde enquanto buscamos os dados da contratação.</Text>
           </View>
         </View>
@@ -822,7 +829,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
   if (!artista) {
     return (
       <View style={[styles.root, { backgroundColor: theme.mainBg }]}>
-        <Sidebar />
+        {showSidebar ? <Sidebar /> : null}
         <View style={{ flex: 1 }}>
           <Header />
           <View style={{ padding: 24, gap: 12 }}>
@@ -837,7 +844,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
               onPress={voltar}
               accessibilityRole="button"
             >
-              <Text style={[styles.btnText, { color: '#FFFFFF' }]}>Voltar</Text>
+              <Text style={[styles.btnText, { color: theme.onAccent || '#FFFFFF' }]}>Voltar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -849,7 +856,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
   if (ehProprioPerfil) {
     return (
       <View style={[styles.root, { backgroundColor: theme.mainBg }]}>
-        <Sidebar />
+        {showSidebar ? <Sidebar /> : null}
         <View style={{ flex: 1 }}>
           <Header />
           <View style={{ padding: 24, gap: 12 }}>
@@ -864,7 +871,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
               onPress={voltar}
               accessibilityRole="button"
             >
-              <Text style={[styles.btnText, { color: '#FFFFFF' }]}>Voltar</Text>
+              <Text style={[styles.btnText, { color: theme.onAccent || '#FFFFFF' }]}>Voltar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -874,18 +881,18 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
 
   return (
     <View style={[styles.root, { backgroundColor: theme.mainBg }]}>
-      <Sidebar />
+      {showSidebar ? <Sidebar /> : null}
 
       <View style={{ flex: 1 }}>
         <Header />
 
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           {/* Título */}
-          <View style={[styles.row, { justifyContent: 'space-between', marginBottom: 16 }]}>
+          <View style={[styles.row, styles.contractHero, { backgroundColor: theme.heroBg || theme.textPrimary }, { justifyContent: 'space-between', marginBottom: 18, alignItems: narrow ? 'flex-start' : 'center', flexDirection: narrow ? 'column' : 'row', gap: narrow ? 12 : 0 }]}>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.breadcrumb, { color: theme.textSecondary }]}>
+              <Text style={[styles.breadcrumb, { color: theme.heroMuted || theme.textSecondary }]}>
                 Contratações ›{' '}
-                <Text style={{ color: theme.accent }}>Nova contratação</Text>
+                <Text style={{ color: theme.artGold || theme.accent }}>Nova contratação</Text>
               </Text>
               <Text style={[styles.title, { color: theme.textPrimary }]}>
                 Contratar {artista.nome}
@@ -896,16 +903,16 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
               <View
                 style={[
                   styles.artistIcon,
-                  { backgroundColor: theme.mainBg, borderColor: theme.borderColor },
+                  { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.18)' },
                 ]}
               >
                 <Ionicons name="musical-notes" size={16} color={theme.accent} />
               </View>
               <View style={{ marginLeft: 10 }}>
-                <Text style={[styles.artistGenre, { color: theme.textSecondary }]}>
+                <Text style={[styles.artistGenre, { color: theme.heroMuted || theme.textSecondary }]}>
                   {artista.estilo}
                 </Text>
-                <Text style={[styles.artistRating, { color: theme.textSecondary }]}>
+                <Text style={[styles.artistRating, { color: theme.heroMuted || theme.textSecondary }]}>
                   <Text style={{ color: theme.accent }}>★ </Text>
                   {String(artista.nota).replace('.', ',')} ({artista.avaliacoes} avaliações)
                 </Text>
@@ -914,7 +921,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
           </View>
 
           {/* Card */}
-          <View style={[styles.card, { backgroundColor: theme.cardBg }]}>
+          <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.borderColor, borderLeftColor: theme.accent }]}>
             <View style={twoCols ? styles.rowTop : undefined}>
               {colunaDados}
               {colunaValor}
@@ -971,9 +978,10 @@ const styles = StyleSheet.create({
 
   
   // Conteúdo
-  content: { padding: 20, paddingBottom: 40 },
+  content: { width: '100%', maxWidth: 1120, alignSelf: 'center', padding: 24, paddingBottom: 40 },
+  contractHero: { borderRadius: 24, padding: 22, overflow: 'hidden' },
   breadcrumb: { fontSize: 10, marginBottom: 4 },
-  title: { fontFamily: serif, fontSize: 22, fontWeight: '600' },
+  title: { fontFamily: serif, fontSize: 30, lineHeight: 36, fontWeight: '900', letterSpacing: -0.6 },
   row: { flexDirection: 'row', alignItems: 'center' },
   // linhas de formulário: alinha no topo para a mensagem de erro não desalinhar os campos
   rowTop: { flexDirection: 'row', alignItems: 'flex-start' },
@@ -992,20 +1000,22 @@ const styles = StyleSheet.create({
 
   // Card
   card: {
-    borderRadius: 20,
-    padding: 24,
-    shadowColor: '#000',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderLeftWidth: 4,
+    padding: 26,
+    shadowColor: '#2D1B13',
     shadowOpacity: 0.06,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
   },
-  sectionTitle: { fontFamily: serif, fontSize: 14, marginBottom: 12 },
+  sectionTitle: { fontFamily: serif, fontSize: 16, fontWeight: '800', marginBottom: 14 },
   label: { fontSize: 11, marginBottom: 6 },
   input: {
     height: 40,
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 14,
     paddingHorizontal: 12,
     fontSize: 12,
   },
@@ -1018,7 +1028,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 14,
-    borderRadius: 8,
+    borderRadius: 16,
     marginBottom: 14,
   },
   valorBaseLabel: { fontSize: 11 },
@@ -1038,7 +1048,7 @@ const styles = StyleSheet.create({
   btn: {
     height: 44,
     paddingHorizontal: 22,
-    borderRadius: 8,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },

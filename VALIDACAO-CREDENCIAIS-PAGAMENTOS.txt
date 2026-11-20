@@ -1,0 +1,35 @@
+PORTAL DA ARTE - VALIDACAO DE CREDENCIAIS E PAGAMENTOS
+======================================================
+
+Integracoes consolidadas:
+- .env backend real do projeto anterior: integrado.
+- .env frontend real do projeto anterior: integrado.
+- SMTP: configuracao existente preservada.
+- Supabase: configuracao existente preservada.
+- MySQL: configuracao existente preservada.
+- Checkout Asaas do carrinho: mantido.
+- Modulo financeiro Asaas Sandbox do ZIP PortalDaArte-Somente-Pagamentos.zip: incorporado.
+- BancoDeDados/pagamentos_sandbox.sql: incorporado.
+- Pagamento PIX Sandbox / NFS-e: arquivos incorporados.
+- Token de webhook: gerado e gravado somente no python-api/.env privado.
+
+Dado ausente nos materiais enviados:
+- ASAAS_API_KEY: NAO estava preenchida no ZIP de pagamentos nem nos .env dos RARs anteriores.
+  A variavel existe no python-api/.env final, mas permanece vazia para evitar inventar uma credencial.
+
+Dados que dependem da implantacao:
+- ASAAS_WEBHOOK_PUBLIC_URL: precisa apontar para uma URL HTTPS publica do backend.
+- ASAAS_PIX_FEE_ESTIMATED: necessario apenas no fluxo PIX individual Sandbox.
+- ASAAS_NF_BASE e ASAAS_NF_CONFIG_JSON: necessarios apenas para NFS-e.
+
+Validacoes executadas nesta versao:
+- TypeScript (tsc --noEmit): OK.
+- Expo Web export: OK, 19 rotas estaticas.
+- Expo Android export: OK.
+- Expo iOS export: OK.
+- Python py_compile para main.py e modulos de pagamentos: OK.
+- mysql-connector-python nao esta instalado neste ambiente de execucao, portanto nao houve conexao real com MySQL/Asaas.
+
+Seguranca:
+ESTE PACOTE CONTEM .env PRIVADOS. NAO PUBLICAR O ZIP E NAO COMITAR OS .env NO GIT.
+Use VERIFICAR-CREDENCIAIS.bat para verificar configuracoes faltantes sem imprimir segredos.

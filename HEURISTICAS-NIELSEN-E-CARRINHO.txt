@@ -1,0 +1,51 @@
+PORTAL DA ARTE - HEURISTICAS DE NIELSEN APLICADAS
+Data: 20/11/2026
+
+1. VISIBILIDADE DO ESTADO DO SISTEMA
+- Contador do carrinho visivel no Header/Sidebar.
+- Feedback imediato ao adicionar, remover, restaurar ou limpar itens.
+- Estados de checkout: preparando, aguardando pagamento, pago, cancelado, expirado e erro.
+
+2. CORRESPONDENCIA ENTRE SISTEMA E MUNDO REAL
+- Termos simples: Carrinho, Ver servicos, Entrar para pagar, Pagar tudo de uma vez.
+- Servico com faixa de preco e tratado como orcamento, nao como compra de valor arbitrario.
+
+3. CONTROLE E LIBERDADE DO USUARIO
+- Visitante explora e monta carrinho sem login.
+- Remocao de item oferece restauracao.
+- Carrinho pode ser limpo com confirmacao.
+- Cancelar/expirar checkout nao apaga os itens escolhidos.
+
+4. CONSISTENCIA E PADROES
+- Acoes principais usam o mesmo padrao visual e verbal.
+- Carrinho aparece na navegacao global.
+- Fluxos publicos e privados seguem a mesma regra em todas as telas.
+
+5. PREVENCAO DE ERROS
+- Backend ignora o preco enviado pelo cliente e recalcula pelo MySQL.
+- Servico inativo, inexistente ou com preco variavel e bloqueado antes do pagamento.
+- Usuario nao pode comprar o proprio servico.
+- Checkout limitado a 20 servicos por transacao.
+
+6. RECONHECIMENTO EM VEZ DE MEMORIZACAO
+- Itens exibem artista, servico e valor no proprio carrinho.
+- O usuario nao precisa lembrar onde estava: apos login, o checkout e retomado.
+
+7. FLEXIBILIDADE E EFICIENCIA
+- Adicao rapida ao carrinho em Descobrir para servicos fixos.
+- Perfil publico oferece detalhes antes da decisao.
+- Um unico pagamento pode agrupar servicos de varios artistas.
+
+8. DESIGN ESTETICO E MINIMALISTA
+- Grid com respiro e numero de colunas coerente com o espaco real.
+- Informacao essencial priorizada: artista, servico, avaliacao, preco e acao.
+- Filtros saem da lateral em telas menores para preservar espaco dos artistas.
+
+9. AJUDA PARA RECONHECER E RECUPERAR ERROS
+- Mensagens explicam quando um servico precisa de orcamento.
+- Erros de checkout sao exibidos sem apagar o carrinho.
+- Estados cancelado/expirado permitem nova tentativa.
+
+10. AJUDA E DOCUMENTACAO
+- LEIA-ME documenta configuracao, MySQL, Asaas, Webhook e teste do fluxo.
+- .env.example inclui as variaveis necessarias sem expor credenciais.

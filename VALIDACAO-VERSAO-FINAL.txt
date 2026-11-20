@@ -1,0 +1,36 @@
+PORTAL DA ARTE - VALIDACAO FINAL DESIGN + CARRINHO
+Data: 20/11/2026
+
+[OK] TypeScript: npx tsc --noEmit - 0 erros.
+[OK] Expo Web: export concluido - 17 rotas estaticas, incluindo Carrinho.
+[OK] Expo Android: bundle Hermes concluido; assets VLibras incluidos.
+[OK] Expo iOS: bundle Hermes concluido; assets VLibras incluidos.
+[OK] Backend: main.py, portfolio_storage.py e configurar_webhook_asaas.py compilam com py_compile.
+[OK] Auditoria estatica de acessibilidade: 0 alta / 0 media / 0 total no auditor utilizado.
+[OK] Carrinho e rota de Carrinho publicos sem login.
+[OK] Login possui botao para Explorar sem autenticacao.
+[OK] Checkout exige autenticacao.
+[OK] Precos sao recalculados pelo backend.
+[OK] Webhook valida asaas-access-token e usa id do evento para idempotencia.
+[OK] Fluxo usa CHECKOUT_PAID como confirmacao financeira; callback apenas redireciona.
+[OK] Grid Explorar revisado para evitar corte de cards.
+
+VALIDACAO CONTRA DOCUMENTACAO ASAAS ATUAL
+- Criacao: POST /v3/checkouts.
+- billingTypes: PIX e CREDIT_CARD.
+- chargeTypes: DETACHED.
+- Link: https://asaas.com/checkoutSession/show?id=ID.
+- Confirmacao financeira: CHECKOUT_PAID via Webhook.
+- Callbacks de success/cancel/expired nao sao usados para marcar pagamento como confirmado.
+
+OBSERVACOES DE AMBIENTE
+- A integracao real com MySQL/Asaas/Supabase depende dos .env e servicos da maquina do projeto.
+- Para receber Webhook durante desenvolvimento local, exponha a API em URL HTTPS publica.
+- Teste pagamentos primeiro no Sandbox Asaas.
+- O lint completo deste ambiente continua limitado por uma dependencia opcional nativa que tenta instalar pacote pela rede; TypeScript e bundles Web/Android/iOS passaram.
+
+SEGURANCA DO ZIP
+- .env reais excluidos.
+- node_modules excluido.
+- .expo excluido.
+- caches e backups excluidos.

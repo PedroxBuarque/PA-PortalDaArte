@@ -10,7 +10,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { Accessibility, AlignLeft, Eye, RotateCcw, Type } from 'lucide-react-native';
+import { Accessibility, AlignLeft, Eye, RotateCcw, Sparkles, Type } from 'lucide-react-native';
 import Header from '../../../components/Header';
 import Sidebar from '../../../components/Sidebar';
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
@@ -67,10 +67,17 @@ export default function ConfiguracoesScreen() {
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.contentWrapper}>
-              <Text style={styles.pageTitle} accessibilityRole="header">Configurações</Text>
-              <Text style={styles.pageSubtitle}>
-                Personalize o Portal da Arte de acordo com suas necessidades.
-              </Text>
+              <View style={styles.settingsHero}>
+                <View style={styles.settingsHeroOrb} accessible={false} />
+                <View style={styles.settingsHeroEyebrowRow}>
+                  <Sparkles size={15} color={theme.artGold || theme.accent} accessible={false} />
+                  <Text style={styles.settingsHeroEyebrow}>SEU PORTAL, DO SEU JEITO</Text>
+                </View>
+                <Text style={styles.settingsHeroTitle} accessibilityRole="header">Conforto também faz parte da experiência.</Text>
+                <Text style={styles.settingsHeroText}>
+                  Ajuste leitura, contraste e acessibilidade sem perder a identidade visual do Portal da Arte.
+                </Text>
+              </View>
 
               <View style={styles.tabs} accessibilityRole="tablist">
                 <View style={styles.activeTab} accessibilityRole="tab" accessibilityState={{ selected: true }}>
@@ -244,33 +251,48 @@ const getStyles = (theme: any, compact: boolean) =>
     scrollView: { flex: 1 },
     scrollContent: { flexGrow: 1, paddingBottom: 36 },
     contentWrapper: {
-      width: '100%', maxWidth: 900, alignSelf: 'center',
+      width: '100%', maxWidth: 960, alignSelf: 'center',
       paddingHorizontal: compact ? 18 : 32, paddingTop: compact ? 22 : 32,
     },
-    pageTitle: { color: theme.textPrimary, fontSize: 28, fontWeight: '800' },
-    pageSubtitle: { color: theme.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 6, marginBottom: 24 },
-    tabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: theme.borderColor, marginBottom: 20 },
-    activeTab: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4, paddingVertical: 12, borderBottomWidth: 2, borderBottomColor: theme.accent },
+    settingsHero: {
+      backgroundColor: theme.heroBg || theme.textPrimary,
+      borderRadius: 26,
+      padding: compact ? 20 : 28,
+      marginBottom: 22,
+      overflow: 'hidden',
+      position: 'relative',
+      ...Platform.select({ web: { boxShadow: `0 18px 42px ${theme.shadowStrong || theme.shadowColor}` } }),
+    },
+    settingsHeroOrb: {
+      position: 'absolute', width: 180, height: 180, borderRadius: 90, right: -55, top: -75,
+      backgroundColor: theme.accent, opacity: 0.16,
+    },
+    settingsHeroEyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+    settingsHeroEyebrow: { color: theme.artGold || theme.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1.5 },
+    settingsHeroTitle: { color: theme.heroText || '#FFFFFF', fontFamily: 'serif', fontSize: compact ? 27 : 31, lineHeight: compact ? 32 : 37, fontWeight: '900', letterSpacing: -0.6, maxWidth: 670 },
+    settingsHeroText: { color: theme.heroMuted || '#E6D8CF', fontSize: 12.5, lineHeight: 19, marginTop: 10, maxWidth: 620 },
+    tabs: { alignSelf: 'flex-start', flexDirection: 'row', backgroundColor: theme.surfaceMuted || theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 16, padding: 5, marginBottom: 22 },
+    activeTab: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, ...Platform.select({ web: { boxShadow: `0 6px 16px ${theme.shadowColor}` } }) },
     activeTabText: { color: theme.accent, fontSize: 14, fontWeight: '700' },
-    card: { backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 14, padding: compact ? 18 : 22, marginBottom: 16 },
+    card: { backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderLeftWidth: 4, borderLeftColor: theme.accent, borderRadius: 20, padding: compact ? 18 : 22, marginBottom: 16, ...Platform.select({ web: { boxShadow: `0 10px 28px ${theme.shadowColor || 'rgba(0,0,0,0.05)'}` } }) },
     sectionHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 4 },
     sectionHeaderInline: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingRight: 16 },
-    sectionIcon: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.menuActiveBg, borderWidth: 1, borderColor: theme.borderColor },
+    sectionIcon: { width: 40, height: 40, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.accentSoft || theme.menuActiveBg, borderWidth: 1, borderColor: theme.borderColor },
     sectionCopy: { flex: 1, minWidth: 0 },
     sectionTitle: { color: theme.textPrimary, fontSize: 16, fontWeight: '700' },
     sectionDescription: { color: theme.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 4 },
     settingRow: { flexDirection: compact ? 'column' : 'row', alignItems: compact ? 'flex-start' : 'center', justifyContent: 'space-between', gap: compact ? 14 : 18 },
     fontOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-    fontOption: { minWidth: 74, height: 42, borderRadius: 10, borderWidth: 1, borderColor: theme.borderColor, backgroundColor: theme.cardBg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
+    fontOption: { minWidth: 76, height: 44, borderRadius: 11, borderWidth: 1, borderColor: theme.borderColor, backgroundColor: theme.cardBg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
     fontOptionSelected: { borderColor: theme.accent, backgroundColor: theme.menuActiveBg, borderWidth: 2 },
     fontOptionText: { color: theme.textPrimary, fontSize: 13, fontWeight: '600' },
     fontOptionTextSelected: { color: theme.accent, fontWeight: '800' },
     helperText: { color: theme.textSecondary, fontSize: 11, lineHeight: 17, marginTop: 14 },
     screenReaderStatus: { color: theme.textPrimary, fontSize: 12, fontWeight: '700', marginTop: 10 },
-    previewCard: { backgroundColor: theme.cardBg, borderWidth: 2, borderColor: theme.borderColor, borderRadius: 14, padding: 22, marginBottom: 16 },
+    previewCard: { backgroundColor: theme.surfaceMuted || theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 22, padding: compact ? 18 : 24, marginBottom: 16 },
     previewLabel: { color: theme.textSecondary, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8 },
     previewTitle: { color: theme.textPrimary, fontSize: 20, fontWeight: '800', marginBottom: 6 },
     previewText: { color: theme.textSecondary, fontSize: 13, lineHeight: 20 },
-    resetButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: theme.cardBg },
+    resetButton: { minHeight: 44, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: theme.cardBg },
     resetButtonText: { color: theme.textPrimary, fontSize: 12, fontWeight: '700' },
   });

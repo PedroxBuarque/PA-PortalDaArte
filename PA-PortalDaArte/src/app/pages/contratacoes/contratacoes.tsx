@@ -6,9 +6,10 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from 'react-native';
-import { Music } from 'lucide-react-native';
+import { CalendarDays, Music } from 'lucide-react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import CardContratacao, { type Contratacao } from '../../../components/contratacoes/CardContratacao';
@@ -43,7 +44,9 @@ function toCard(item: PropostaApi): Contratacao {
 export default function ContratacoesScreen() {
   const router = useRouter();
   const { theme, isLightMode } = useTheme();
-  const styles = getStyles(theme);
+  const { width } = useWindowDimensions();
+  const compact = width < 900;
+  const styles = getStyles(theme, compact);
   const [items, setItems] = useState<PropostaApi[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -69,12 +72,12 @@ export default function ContratacoesScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar
-        barStyle={isLightMode ? 'dark-content' : 'light-content'}
+        barStyle={theme.statusBarStyle || (isLightMode ? 'dark-content' : 'light-content')}
         backgroundColor={theme.headerBg}
       />
 
       <View style={styles.dashboardContainer}>
-        <Sidebar />
+        {!compact ? <Sidebar /> : null}
         <View style={styles.mainContent}>
           <Header />
           <ScrollView
@@ -84,8 +87,14 @@ export default function ContratacoesScreen() {
           >
             <View style={styles.contentWrapper}>
               <View style={styles.pageHeader}>
-                <Text style={styles.pageTitle} accessibilityRole="header">Contratações</Text>
-                <Text style={styles.pageSubtitle}>Solicitações enviadas e recebidas pela sua conta.</Text>
+                <View style={styles.headerIcon} accessible={false}>
+                  <CalendarDays size={20} color={theme.onAccent || '#FFFFFF'} accessible={false} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.pageEyebrow}>AGENDA DE PROJETOS</Text>
+                  <Text style={styles.pageTitle} accessibilityRole="header">Contratações em movimento.</Text>
+                  <Text style={styles.pageSubtitle}>Acompanhe propostas, prazos e próximos passos em um só lugar.</Text>
+                </View>
               </View>
 
               {loading ? (
@@ -132,7 +141,7 @@ export default function ContratacoesScreen() {
   );
 }
 
-const getStyles = (theme: any) => StyleSheet.create({
+const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.mainBg,
@@ -146,17 +155,23 @@ const getStyles = (theme: any) => StyleSheet.create({
   },
   scrollView: { flex: 1 },
   scrollContentContainer: { flexGrow: 1 },
-  contentWrapper: { flex: 1, paddingHorizontal: 32, paddingTop: 20, paddingBottom: 24 },
-  pageHeader: { marginBottom: 20 },
-  pageTitle: { fontSize: 28, fontWeight: '700', color: theme.textPrimary },
-  pageSubtitle: { color: theme.textSecondary, fontSize: 13, marginTop: 6 },
+  contentWrapper: { flex: 1, width: '100%', maxWidth: 1080, alignSelf: 'center', paddingHorizontal: compact ? 18 : 32, paddingTop: compact ? 20 : 28, paddingBottom: 32 },
+  pageHeader: {
+    marginBottom: 22, backgroundColor: theme.heroBg || theme.textPrimary, borderRadius: 24,
+    padding: compact ? 18 : 24, flexDirection: 'row', alignItems: 'center', gap: 16, overflow: 'hidden',
+    ...Platform.select({ web: { boxShadow: `0 16px 38px ${theme.shadowStrong || theme.shadowColor}` } }),
+  },
+  headerIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.accent, transform: [{ rotate: '-4deg' }] },
+  pageEyebrow: { color: theme.artGold || theme.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1.5, marginBottom: 4 },
+  pageTitle: { fontSize: compact ? 24 : 29, lineHeight: compact ? 29 : 34, fontWeight: '900' as any, color: theme.heroText || '#FFFFFF', fontFamily: 'serif', letterSpacing: -0.5 },
+  pageSubtitle: { color: theme.heroMuted || '#E6D8CF', fontSize: 12.5, lineHeight: 18, marginTop: 6 },
   cardsContainer: { gap: 14, paddingBottom: 8 },
   stateBox: {
     backgroundColor: theme.cardBg,
     borderWidth: 1,
     borderColor: theme.borderColor,
-    borderRadius: 14,
-    padding: 28,
+    borderRadius: 22,
+    padding: compact ? 24 : 32,
     alignItems: 'center',
     gap: 10,
   },

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View, TouchableOpacity, SafeAreaView, StatusBar, ScrollView, Platform, Alert, Image, Modal, Dimensions } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, SafeAreaView, StatusBar, ScrollView, Platform, Alert, Image, Modal, useWindowDimensions } from 'react-native';
 import { AccessibleTextInput as TextInput } from '../../../components/accessibility/AccessibleTextInput';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -14,9 +14,11 @@ import {
   MoreHorizontal,
   Info,
   Trash2,
+  ArrowLeft,
+  MessageSquare,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Video, ResizeMode } from 'expo-av';
+import { AppVideo } from '../../../components/media/AppVideo';
 
 // Importações dos Componentes e do Contexto
 import Sidebar from '../../../components/Sidebar';
@@ -24,7 +26,6 @@ import Header from '../../../components/Header';
 import { useTheme } from '../../../components/context/ThemeContext';
 
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const URL_API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,10 @@ type Mensagem = {
 export default function MensagensScreen() {
   const router = useRouter();
   const { theme, isLightMode } = useTheme();
-  const styles = getStyles(theme) as any;
+  const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
+  const compactShell = viewportWidth < 900;
+  const compactChat = viewportWidth < 760;
+  const styles = getStyles(theme, compactChat, viewportWidth, viewportHeight) as any;
 
   const params = useLocalSearchParams<{ destinatarioId?: string | string[]; destinatarioNome?: string | string[]; conversaId?: string | string[] }>();
   const destinatarioId = Array.isArray(params.destinatarioId) ? params.destinatarioId[0] : params.destinatarioId;
@@ -332,18 +336,19 @@ export default function MensagensScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar
-        barStyle={isLightMode ? 'dark-content' : 'light-content'}
+        barStyle={theme.statusBarStyle || (isLightMode ? 'dark-content' : 'light-content')}
         backgroundColor={theme.headerBg}
       />
       <View style={styles.dashboardContainer}>
-        <Sidebar />
+        {!compactShell ? <Sidebar /> : null}
 
         <View style={styles.mainContent}>
           <Header />
 
           <View style={styles.messagesLayout}>
             {/* ---------------------- COLUNA DA ESQUERDA ---------------------- */}
-            <View style={styles.conversationsPanel}>
+            {(!compactChat || !selectedConversation) ? (
+            <View style={[styles.conversationsPanel, compactChat && styles.conversationsPanelCompact]}>
               <View style={styles.pageHeader}>
                 <Text style={styles.pageTitle}>Mensagens</Text>
                 <Text style={styles.pageSubtitle}> 
@@ -409,13 +414,25 @@ export default function MensagensScreen() {
                 })}
               </ScrollView>
             </View>
+            ) : null}
 
             {/* ------------------------- PAINEL DO CHAT ------------------------ */}
+            {(!compactChat || !!selectedConversation) ? (
             <View style={styles.chatPanel}>
               {selectedConversation && SelectedIcon && (
                 <>
                   <View style={styles.chatHeader}>
                     <View style={styles.chatHeaderLeft}>
+                      {compactChat ? (
+                        <TouchableOpacity
+                          style={styles.chatBackButton}
+                          onPress={() => setSelectedId('')}
+                          accessibilityRole="button"
+                          accessibilityLabel="Voltar para conversas"
+                        >
+                          <ArrowLeft size={20} color={theme.textPrimary} accessible={false} />
+                        </TouchableOpacity>
+                      ) : null}
                       <View
                         style={[
                           styles.chatAvatar,
@@ -562,14 +579,14 @@ export default function MensagensScreen() {
                               >
                                 {msg.mediaType === 'video' ? (
                                   <View style={styles.videoThumbnailContainer}>
-                                    <Video
-                                      source={{ uri: msg.mediaUri }}
+                                    <AppVideo
+                                      uri={msg.mediaUri}
                                       style={styles.chatImageMessage}
-                                      videoStyle={styles.exactVideoSize} // <-- CORRIGIDO: Força o vídeo a respeitar as dimensões da caixa sem zoom
-                                      resizeMode={ResizeMode.CONTAIN}
-                                      shouldPlay={false}
-                                      isMuted={true}
-                                      positionMillis={1000}
+                                      contentFit="contain"
+                                      nativeControls={false}
+                                      muted
+                                      startAt={1}
+                                      accessibilityLabel="Prévia do vídeo enviado na conversa"
                                     />
                                     <View style={styles.playButtonOverlay}>
                                       <Play size={24} color="#FFF" />
@@ -658,10 +675,15 @@ export default function MensagensScreen() {
               )}
               {!selectedConversation && (
                 <View style={styles.chatEmptyState}>
-                  <Text style={styles.pageSubtitle}>Selecione uma conversa</Text>
+                  <View style={styles.chatEmptyIcon} accessible={false}>
+                    <MessageSquare size={28} color={theme.accent} accessible={false} />
+                  </View>
+                  <Text style={styles.chatEmptyTitle}>Suas conversas</Text>
+                  <Text style={styles.chatEmptyText}>Selecione uma conversa ao lado para ler e enviar mensagens.</Text>
                 </View>
               )}
             </View>
+            ) : null}
           </View>
         </View>
       </View>
@@ -679,13 +701,13 @@ export default function MensagensScreen() {
           </TouchableOpacity>
 
           {midiaVisualizacao?.type === 'video' ? (
-            <Video
-              source={{ uri: midiaVisualizacao.uri }}
+            <AppVideo
+              uri={midiaVisualizacao.uri}
               style={styles.modalVideoFull}
-              videoStyle={styles.modalExactVideoSize} // <-- CORRIGIDO: Impede o zoom no modo tela cheia
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay={true}
+              contentFit="contain"
+              nativeControls
+              autoPlay
+              accessibilityLabel="Vídeo da conversa em tela cheia"
             />
           ) : (
             midiaVisualizacao && (
@@ -728,7 +750,7 @@ export default function MensagensScreen() {
 // ---------------------------------------------------------------------------
 // 3) ESTILOS
 // ---------------------------------------------------------------------------
-const getStyles = (theme: any) =>
+const getStyles = (theme: any, compactChat: boolean, viewportWidth: number, viewportHeight: number) =>
   StyleSheet.create({
     container: {
       flex: 1,
@@ -754,48 +776,65 @@ const getStyles = (theme: any) =>
       overflow: 'hidden',
     },
     conversationsPanel: {
-      width: 300,
+      width: 320,
       borderRightWidth: 1,
       borderRightColor: theme.borderColor,
-      paddingHorizontal: 20,
-      paddingTop: 16,
+      paddingHorizontal: 18,
+      paddingTop: 18,
+      backgroundColor: theme.mainBg,
+    },
+    conversationsPanelCompact: {
+      width: '100%',
+      borderRightWidth: 0,
+      paddingHorizontal: 16,
+      paddingTop: 18,
+      backgroundColor: theme.mainBg,
     },
     pageHeader: {
-      marginBottom: 12,
+      marginBottom: 14,
+      padding: 16,
+      borderRadius: 18,
+      backgroundColor: theme.heroBg || theme.textPrimary,
+      overflow: 'hidden',
     },
     pageTitle: {
-      fontSize: 24,
-      fontWeight: '700',
-      color: theme.textPrimary,
+      fontSize: compactChat ? 24 : 26,
+      fontWeight: '850' as any,
+      color: theme.heroText || '#FFFFFF',
+      fontFamily: 'serif',
+      letterSpacing: -0.3,
     },
     pageSubtitle: {
       fontSize: 12,
-      color: theme.textSecondary,
-      marginTop: 2,
+      color: theme.heroMuted || '#E6D8CF',
+      marginTop: 4,
     },
     conversationsScroll: {
       flex: 1,
     },
     conversationItem: {
       flexDirection: 'row',
-      padding: 10,
-      borderRadius: 10,
+      padding: 11,
+      minHeight: 66,
+      borderRadius: 16,
       marginBottom: 8,
       borderWidth: 1,
-      borderColor: 'transparent',
+      borderColor: theme.borderColor,
+      backgroundColor: theme.cardBg,
     },
     conversationItemActive: {
-      backgroundColor: theme.cardBg,
+      backgroundColor: theme.accentSoft || theme.cardBg,
       borderColor: theme.accent,
+      ...Platform.select({ web: { boxShadow: `0 6px 18px ${theme.shadowColor || 'rgba(0,0,0,0.05)'}` } }),
     },
-    avatarImage: { width: 40, height: 40, borderRadius: 20 },
+    avatarImage: { width: 42, height: 42, borderRadius: 14 },
     chatAvatarImage: { width: 36, height: 36, borderRadius: 18 },
     errorText: { color: '#E05A10', fontSize: 12, marginVertical: 8 },
     emptyConversations: { paddingVertical: 20, gap: 8 },
     avatarContainer: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
+      width: 42,
+      height: 42,
+      borderRadius: 14,
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: 10,
@@ -811,7 +850,7 @@ const getStyles = (theme: any) =>
     },
     conversationName: {
       fontSize: 14,
-      fontWeight: '700',
+      fontWeight: '850' as any,
       color: theme.textPrimary,
       flexShrink: 1,
     },
@@ -859,19 +898,37 @@ const getStyles = (theme: any) =>
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
+      paddingHorizontal: 32,
     },
+    chatEmptyIcon: {
+      width: 58, height: 58, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: theme.accentSoft || theme.menuActiveBg, marginBottom: 14,
+    },
+    chatEmptyTitle: { color: theme.textPrimary, fontSize: 18, fontWeight: '800', marginBottom: 6 },
+    chatEmptyText: { color: theme.textSecondary, fontSize: 13, lineHeight: 20, textAlign: 'center', maxWidth: 360 },
     chatHeader: {
-      flexDirection: 'row',
+      flexDirection: compactChat ? 'column' : 'row',
       justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingHorizontal: 24,
-      paddingVertical: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.borderColor,
+      alignItems: compactChat ? 'stretch' : 'center',
+      gap: compactChat ? 12 : 0,
+      paddingHorizontal: compactChat ? 14 : 24,
+      paddingVertical: 14,
+      borderWidth: 1,
+      borderColor: theme.borderColor,
+      backgroundColor: theme.cardBg,
+      borderRadius: 20,
+      marginHorizontal: compactChat ? 10 : 16,
+      marginTop: 10,
+      ...Platform.select({ web: { boxShadow: `0 10px 26px ${theme.shadowColor}` } }),
     },
     chatHeaderLeft: {
       flexDirection: 'row',
       alignItems: 'center',
+      minWidth: 0,
+    },
+    chatBackButton: {
+      width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
+      borderWidth: 1, borderColor: theme.borderColor, backgroundColor: theme.surfaceMuted || theme.mainBg, marginRight: 10,
     },
     chatAvatar: {
       width: 36,
@@ -904,9 +961,13 @@ const getStyles = (theme: any) =>
     },
     btnConfirm: {
       backgroundColor: theme.accent,
-      paddingVertical: 8,
+      minHeight: 40,
+      paddingVertical: 9,
       paddingHorizontal: 16,
-      borderRadius: 6,
+      borderRadius: 11,
+      alignItems: 'center',
+      justifyContent: 'center',
+      alignSelf: compactChat ? 'stretch' : 'auto',
     },
     btnConfirmText: {
       color: '#FFFFFF',
@@ -949,8 +1010,8 @@ const getStyles = (theme: any) =>
       alignItems: 'flex-end',
     },
     bubble: {
-      borderRadius: 12,
-      paddingVertical: 8,
+      borderRadius: 18,
+      paddingVertical: 10,
       paddingHorizontal: 12,
       paddingRight: 28,
       position: 'relative',
@@ -966,11 +1027,11 @@ const getStyles = (theme: any) =>
       backgroundColor: theme.cardBg,
       borderWidth: 1,
       borderColor: theme.borderColor,
-      borderTopLeftRadius: 2,
+      borderTopLeftRadius: 5,
     },
     bubbleMine: {
       backgroundColor: theme.backgroundColor,
-      borderTopRightRadius: 2,
+      borderTopRightRadius: 5,
     },
     whatsappOptionsButton: {
       position: 'absolute',
@@ -1048,8 +1109,8 @@ const getStyles = (theme: any) =>
       borderRadius: 8,
     },
     modalExactVideoSize: {
-      width: SCREEN_WIDTH * 0.9,
-      height: SCREEN_HEIGHT * 0.8,
+      width: viewportWidth * 0.9,
+      height: viewportHeight * 0.8,
     },
     videoThumbnailContainer: {
       width: 220,
@@ -1104,10 +1165,11 @@ const getStyles = (theme: any) =>
     inputRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingHorizontal: 20,
+      paddingHorizontal: compactChat ? 12 : 20,
       paddingVertical: 14,
       borderTopWidth: 1,
       borderTopColor: theme.borderColor,
+      backgroundColor: theme.surfaceRaised || theme.cardBg,
     },
     cameraButton: {
       padding: 8,
@@ -1118,7 +1180,7 @@ const getStyles = (theme: any) =>
       backgroundColor: theme.cardBg,
       borderWidth: 1,
       borderColor: theme.borderColor,
-      borderRadius: 12,
+      borderRadius: 18,
       paddingHorizontal: 16,
       paddingVertical: Platform.OS === 'web' ? 10 : 8,
       color: theme.textPrimary,
@@ -1127,9 +1189,9 @@ const getStyles = (theme: any) =>
     },
     sendButton: {
       backgroundColor: theme.sendBtnBg,
-      width: 34,
-      height: 34,
-      borderRadius: 17,
+      width: 42,
+      height: 42,
+      borderRadius: 14,
       alignItems: 'center',
       justifyContent: 'center',
       marginLeft: 8,
@@ -1148,12 +1210,12 @@ const getStyles = (theme: any) =>
       padding: 10,
     },
     modalImageFull: {
-      width: SCREEN_WIDTH * 0.9,
-      height: SCREEN_HEIGHT * 0.8,
+      width: viewportWidth * 0.9,
+      height: viewportHeight * 0.8,
     },
     modalVideoFull: {
-      width: SCREEN_WIDTH * 0.9,
-      height: SCREEN_HEIGHT * 0.8,
+      width: viewportWidth * 0.9,
+      height: viewportHeight * 0.8,
     },
     dadosModalContent: {
       width: 320,

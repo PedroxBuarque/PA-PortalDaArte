@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 
-import { ActivityIndicator, Alert, DeviceEventEmitter, Image, Linking, Modal, Platform, SafeAreaView, ScrollView, StatusBar, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, DeviceEventEmitter, Image, Linking, Modal, Platform, SafeAreaView, ScrollView, StatusBar, StyleSheet, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { AccessibleTextInput as TextInput } from '../../../components/accessibility/AccessibleTextInput';
 
 import {
@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react-native";
 
-import { ResizeMode, Video } from "expo-av";
+import { AppVideo } from '../../../components/media/AppVideo';
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -98,6 +98,8 @@ const FIXED_CATEGORIES = PROFILE_CATEGORIES;
 
 export default function IndexScreen() {
   const { theme, isLightMode } = useTheme();
+  const { width } = useWindowDimensions();
+  const showSidebar = width >= 900;
   const styles = getStyles(theme);
 
   const [loadingBackend, setLoadingBackend] = useState(true);
@@ -1002,12 +1004,12 @@ export default function IndexScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar
-        barStyle={isLightMode ? "dark-content" : "light-content"}
+        barStyle={theme.statusBarStyle || (isLightMode ? "dark-content" : "light-content")}
         backgroundColor={theme.headerBg || theme.mainBg}
       />
 
       <View style={styles.dashboardContainer}>
-        <Sidebar />
+        {showSidebar ? <Sidebar /> : null}
 
         <View style={styles.mainContent}>
           <Header />
@@ -2370,12 +2372,13 @@ export default function IndexScreen() {
             <X size={26} color="#FFFFFF" />
           </TouchableOpacity>
           {viewerMediaUri && viewerMediaType === "video" ? (
-            <Video
-              source={{ uri: viewerMediaUri }}
+            <AppVideo
+              uri={viewerMediaUri}
               style={styles.viewerImage}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay
+              contentFit="contain"
+              nativeControls
+              autoPlay
+              accessibilityLabel="Vídeo do portfólio em tela cheia"
             />
           ) : viewerMediaUri ? (
             <Image
@@ -2694,23 +2697,36 @@ const getStyles = (theme: any) =>
     },
     scrollContentContainer: { flexGrow: 1 },
     contentWrapper: {
-      paddingHorizontal: 32,
-      paddingTop: 20,
+      width: '100%',
+      maxWidth: 1180,
+      alignSelf: 'center',
+      paddingHorizontal: 24,
+      paddingTop: 24,
       paddingBottom: 40,
     },
     profileHeader: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
-      marginBottom: 18,
+      flexWrap: "wrap",
+      gap: 16,
+      marginBottom: 20,
+      backgroundColor: theme.cardBg,
+      borderWidth: 1,
+      borderColor: theme.borderColor,
+      borderLeftWidth: 4,
+      borderLeftColor: theme.accent,
+      borderRadius: 24,
+      padding: 20,
+      ...Platform.select({ web: { boxShadow: `0 12px 34px ${theme.shadowColor}` } }),
     },
     profileHeaderEditing: {
       borderWidth: 1,
       borderColor: theme.accent,
-      borderRadius: 12,
-      padding: 16,
-      marginTop: -13,
-      marginBottom: 5,
+      borderRadius: 22,
+      padding: 18,
+      marginTop: 0,
+      marginBottom: 12,
       backgroundColor: theme.cardBg,
     },
     profileHeaderLeft: {
@@ -2720,9 +2736,9 @@ const getStyles = (theme: any) =>
     },
     profileData: { flex: 1 },
     profileAvatar: {
-      width: 66,
-      height: 66,
-      borderRadius: 33,
+      width: 78,
+      height: 78,
+      borderRadius: 22,
       backgroundColor: "#D9B59F",
       justifyContent: "center",
       alignItems: "center",
@@ -2738,7 +2754,7 @@ const getStyles = (theme: any) =>
     avatarImage: {
       width: "100%",
       height: "100%",
-      borderRadius: 33,
+      borderRadius: 22,
       resizeMode: "cover",
     },
     avatarEditOverlay: {
@@ -2746,12 +2762,12 @@ const getStyles = (theme: any) =>
       backgroundColor: "rgba(0, 0, 0, 0.4)",
       width: "100%",
       height: "100%",
-      borderRadius: 33,
+      borderRadius: 22,
       justifyContent: "center",
       alignItems: "center",
     },
     profileAvatarText: { color: "#FFFFFF", fontSize: 27, fontWeight: "700" },
-    profileName: { color: theme.textPrimary, fontSize: 24, fontWeight: "700" },
+    profileName: { color: theme.textPrimary, fontSize: 28, lineHeight: 33, fontWeight: "900", fontFamily: "serif", letterSpacing: -0.5 },
     editFormColumn: { width: "100%", gap: 10 },
     editInputBox: {
       backgroundColor: theme.mainBg,
@@ -2806,17 +2822,21 @@ const getStyles = (theme: any) =>
       backgroundColor: theme.accent,
       paddingVertical: 10,
       paddingHorizontal: 17,
-      borderRadius: 7,
+      borderRadius: 14,
+      minHeight: 42,
     },
     editIcon: { color: "#FFFFFF", fontSize: 16, marginRight: 7 },
     editButtonText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
     bioCard: {
       backgroundColor: theme.cardBg,
-      borderRadius: 12,
+      borderRadius: 22,
       borderWidth: 1,
       borderColor: theme.borderColor,
-      padding: 18,
-      marginBottom: 14,
+      borderLeftWidth: 4,
+      borderLeftColor: theme.accent,
+      padding: 22,
+      marginBottom: 16,
+      ...Platform.select({ web: { boxShadow: `0 10px 28px ${theme.shadowColor}` } }),
     },
     bioCardEditing: {
       borderColor: theme.accent,
@@ -2832,7 +2852,7 @@ const getStyles = (theme: any) =>
       alignItems: "center",
       justifyContent: "space-between",
     },
-    sectionTitle: { color: theme.textPrimary, fontSize: 17, fontWeight: "700" },
+    sectionTitle: { color: theme.textPrimary, fontSize: 19, fontWeight: "900", fontFamily: "serif" },
     sectionSubtitle: { color: theme.textSecondary, fontSize: 11, marginTop: 3 },
     bioText: {
       color: theme.textSecondary,
@@ -2973,7 +2993,7 @@ const getStyles = (theme: any) =>
       paddingHorizontal: 9,
     },
     socialText: { color: theme.textSecondary, fontSize: 10 },
-    statsRow: { flexDirection: "row", marginBottom: 22 },
+    statsRow: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginBottom: 22 },
     statCard: {
       flex: 1,
       minHeight: 70,
@@ -2984,7 +3004,7 @@ const getStyles = (theme: any) =>
       padding: 13,
       flexDirection: "row",
       alignItems: "center",
-      marginRight: 12,
+      minWidth: 180,
     },
     statIcon: {
       width: 35,

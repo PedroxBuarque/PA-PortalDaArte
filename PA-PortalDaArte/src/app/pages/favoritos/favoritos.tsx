@@ -15,6 +15,7 @@ import {
  StatusBar,
  StyleSheet,
  TouchableOpacity,
+ useWindowDimensions,
  View,
 } from "react-native";
 
@@ -62,7 +63,9 @@ const formatPrice = (value: number) => `R$ ${Number(value).toLocaleString("pt-BR
 
 export default function IndexScreen() {
   const { theme, isLightMode } = useTheme();
-  const styles = getStyles(theme);
+  const { width } = useWindowDimensions();
+  const compact = width < 900;
+  const styles = getStyles(theme, compact);
   const router = useRouter();
   const { favoriteArtists, isHydrated, removeFavorite } = useFavorites();
 
@@ -100,12 +103,12 @@ export default function IndexScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar
-        barStyle={isLightMode ? "dark-content" : "light-content"}
+        barStyle={theme.statusBarStyle || (isLightMode ? "dark-content" : "light-content")}
         backgroundColor={theme.headerBg}
       />
 
       <View style={styles.dashboardContainer}>
-        <Sidebar />
+        {!compact ? <Sidebar /> : null}
 
         <View style={styles.mainContent}>
           <Header />
@@ -116,9 +119,15 @@ export default function IndexScreen() {
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.contentWrapper}>
-              <View style={styles.pageHeader}>
-                <Text style={styles.pageTitle}>Favoritos</Text>
-                {isHydrated && <Text style={styles.pageSubtitle}>{counterText}</Text>}
+              <View style={styles.collectionHero}>
+                <View style={styles.collectionHeroIcon} accessible={false}>
+                  <Heart size={18} color={theme.onAccent || '#FFFFFF'} fill={theme.onAccent || '#FFFFFF'} accessible={false} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.collectionEyebrow}>SUA CURADORIA PESSOAL</Text>
+                  <Text style={styles.pageTitle}>Artistas que chamaram sua atenção.</Text>
+                  {isHydrated && <Text style={styles.pageSubtitle}>{counterText} para reencontrar quando quiser.</Text>}
+                </View>
               </View>
 
               {!isHydrated ? (
@@ -234,7 +243,7 @@ export default function IndexScreen() {
   );
 }
 
-const getStyles = (theme: any) =>
+const getStyles = (theme: any, compact: boolean) =>
   StyleSheet.create({
     container: {
       flex: 1,
@@ -283,23 +292,41 @@ const getStyles = (theme: any) =>
     },
     contentWrapper: {
       flex: 1,
-      paddingHorizontal: 32,
-      paddingTop: 24,
+      paddingHorizontal: compact ? 18 : 32,
+      paddingTop: compact ? 20 : 24,
       paddingBottom: 24,
     },
-    pageHeader: {
-      marginBottom: 4,
+    collectionHero: {
+      backgroundColor: theme.heroBg || theme.textPrimary,
+      borderRadius: 24,
+      padding: compact ? 18 : 24,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+      marginBottom: 22,
+      overflow: 'hidden',
+      ...Platform.select({ web: { boxShadow: `0 16px 38px ${theme.shadowStrong || theme.shadowColor}` } }),
     },
+    collectionHeroIcon: {
+      width: compact ? 44 : 50, height: compact ? 44 : 50, borderRadius: 16,
+      alignItems: 'center', justifyContent: 'center', backgroundColor: theme.accent,
+      transform: [{ rotate: '-5deg' }],
+    },
+    collectionEyebrow: { color: theme.artGold || theme.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1.4, marginBottom: 5 },
     pageTitle: {
-      fontSize: 28,
-      fontWeight: "700",
-      color: theme.textPrimary,
-      fontFamily: "'Fraunces', serif",
+      fontSize: compact ? 24 : 29,
+      lineHeight: compact ? 29 : 34,
+      fontWeight: '900',
+      color: theme.heroText || '#FFFFFF',
+      fontFamily: 'serif',
+      letterSpacing: -0.5,
+      maxWidth: 690,
     },
     pageSubtitle: {
-      fontSize: 13,
-      color: theme.textSecondary,
-      marginTop: 2,
+      fontSize: 12,
+      lineHeight: 18,
+      color: theme.heroMuted || '#E6D8CF',
+      marginTop: 7,
     },
     emptyState: {
       alignItems: "center",
@@ -336,28 +363,34 @@ const getStyles = (theme: any) =>
     },
     card: {
       backgroundColor: theme.cardBg,
-      borderRadius: 12,
-      paddingVertical: 16,
-      paddingHorizontal: 20,
-      flexDirection: "row",
-      alignItems: "center",
+      borderRadius: 20,
+      borderLeftWidth: 4,
+      borderLeftColor: theme.accent,
+      paddingVertical: compact ? 18 : 16,
+      paddingHorizontal: compact ? 16 : 20,
+      flexDirection: compact ? "column" : "row",
+      alignItems: compact ? "stretch" : "center",
       justifyContent: "space-between",
-      shadowColor: "#000",
+      gap: compact ? 16 : 0,
+      shadowColor: theme.shadowColor || "#000",
       shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
+      shadowOpacity: compact ? 0.04 : 0.07,
       shadowRadius: 4,
       elevation: 3,
       borderWidth: 1,
       borderColor: theme.borderColor,
+      ...Platform.select({ web: { boxShadow: `0 10px 28px ${theme.shadowColor}` } }),
     },
     cardLeftGroup: {
       flexDirection: "row",
       alignItems: "center",
+      flex: 1,
+      minWidth: 0,
     },
     avatarContainer: {
-      width: 52,
-      height: 52,
-      borderRadius: 26,
+      width: 58,
+      height: 58,
+      borderRadius: 18,
       alignItems: "center",
       justifyContent: "center",
       marginRight: 16,
@@ -369,10 +402,13 @@ const getStyles = (theme: any) =>
     },
     artistDetails: {
       justifyContent: "center",
+      flex: 1,
+      minWidth: 0,
     },
     artistName: {
-      fontSize: 16,
-      fontWeight: "700",
+      fontSize: 18,
+      fontWeight: "900",
+      fontFamily: 'serif',
       color: theme.textPrimary,
       marginBottom: 2,
     },
@@ -400,7 +436,8 @@ const getStyles = (theme: any) =>
       fontWeight: "400",
     },
     cardRightGroup: {
-      alignItems: "flex-end",
+      alignItems: compact ? "stretch" : "flex-end",
+      ...(compact ? { borderTopWidth: 1, borderTopColor: theme.borderColor, paddingTop: 14 } : {}),
     },
     pricePrefix: {
       fontSize: 12,
@@ -415,13 +452,16 @@ const getStyles = (theme: any) =>
     actionButtonsRow: {
       flexDirection: "row",
       alignItems: "center",
+      justifyContent: compact ? "space-between" : "flex-end",
       gap: 8,
     },
     btnContract: {
       backgroundColor: theme.accent,
       paddingVertical: 8,
       paddingHorizontal: 20,
-      borderRadius: 6,
+      borderRadius: 13,
+      minHeight: 40,
+      justifyContent: 'center',
     },
     btnContractText: {
       color: "#FFFFFF",
@@ -432,7 +472,9 @@ const getStyles = (theme: any) =>
       borderWidth: 1,
       borderColor: theme.borderColor,
       padding: 7,
-      borderRadius: 6,
+      borderRadius: 10,
+      minWidth: 40,
+      minHeight: 40,
       justifyContent: "center",
       alignItems: "center",
     },

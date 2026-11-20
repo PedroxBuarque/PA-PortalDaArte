@@ -14,47 +14,124 @@ if (
 
 // Aqui definimos as cores da imagem que você mandou!
 export const lightTheme = {
+  statusBarStyle: 'dark-content',
   sidebarBg: '#FFFFFF',
-  mainBg: '#FFF0E6', // Aquele fundo creme elegante
+  sidebarText: '#2D1B13',
+  sidebarMuted: '#6F625C',
+  sidebarSurface: '#F7EEE8',
+  sidebarActiveBg: '#FFF0E6',
+  sidebarActiveText: '#2D1B13',
+  sidebarBorder: '#E6D8CF',
+  brandMarkBg: '#B94A0A',
+  mainBg: '#FAF5F1',
   headerBg: '#FFFFFF',
   cardBg: '#FFFFFF',
-  textPrimary: '#2D1B13', // Marrom escuro para o título
-  textSecondary: '#8B7A73', // Cinza/Marrom claro
-  accent: '#E05A10', // Laranja
-  searchBg: '#F5EBE4',
-  borderColor: '#E8DCD3',
+  surfaceMuted: '#F7EEE8',
+  surfaceRaised: '#FFFFFF',
+  textPrimary: '#2D1B13',
+  textSecondary: '#6F625C',
+  accent: '#B94A0A',
+  accentHover: '#8F3907',
+  accentSoft: '#FBE8DC',
+  onAccent: '#FFFFFF',
+  artGold: '#B94A0A',
+  artRose: '#6F625C',
+  artPlum: '#2D1B13',
+  heroBg: '#FFF0E6',
+  heroText: '#2D1B13',
+  heroMuted: '#6F625C',
+  searchBg: '#F8F1EC',
+  borderColor: '#E6D8CF',
   menuActiveBg: '#FFF0E6',
-  sendBtnBg: '#b91010',
-  backgroundColor: '#b91010',
+  focusRing: '#8F3907',
+  success: '#16794B',
+  warning: '#A15C00',
+  danger: '#B42318',
+  overlay: 'rgba(31, 20, 15, 0.42)',
+  shadowColor: 'rgba(45, 27, 19, 0.08)',
+  shadowStrong: 'rgba(45, 27, 19, 0.14)',
+  sendBtnBg: '#B94A0A',
+  backgroundColor: '#B94A0A',
 };
 
-// Aqui as cores do modo escuro que você já usava
 export const darkTheme = {
-  sidebarBg: '#0F172A',
-  mainBg: '#131C2E',
-  headerBg: '#0F172A',
-  cardBg: '#0F172A',
-  textPrimary: '#FFFFFF',
-  textSecondary: '#8A99AD',
-  accent: '#FF6500',
-  searchBg: '#0B101D',
-  borderColor: '#1A263D',
-  menuActiveBg: '#1E1B2B',
-  sendBtnBg: '#ce3d11',
-  backgroundColor: '#ce3d11'
+  statusBarStyle: 'light-content',
+  sidebarBg: '#0E1728',
+  sidebarText: '#F8FAFC',
+  sidebarMuted: '#B6C1D0',
+  sidebarSurface: '#1B283D',
+  sidebarActiveBg: '#2A201E',
+  sidebarActiveText: '#F8FAFC',
+  sidebarBorder: '#2B3950',
+  brandMarkBg: '#C65316',
+  mainBg: '#111A2B',
+  headerBg: '#0E1728',
+  cardBg: '#151F32',
+  surfaceMuted: '#1B283D',
+  surfaceRaised: '#182438',
+  textPrimary: '#F8FAFC',
+  textSecondary: '#B6C1D0',
+  accent: '#C65316',
+  accentHover: '#FFB184',
+  accentSoft: '#3B241C',
+  onAccent: '#FFFFFF',
+  artGold: '#C65316',
+  artRose: '#B6C1D0',
+  artPlum: '#2B3950',
+  heroBg: '#0E1728',
+  heroText: '#F8FAFC',
+  heroMuted: '#B6C1D0',
+  searchBg: '#0B1322',
+  borderColor: '#2B3950',
+  menuActiveBg: '#2A201E',
+  focusRing: '#FFB184',
+  success: '#5FD09A',
+  warning: '#F5B95F',
+  danger: '#FF8D85',
+  overlay: 'rgba(0, 0, 0, 0.60)',
+  shadowColor: 'rgba(0, 0, 0, 0.24)',
+  shadowStrong: 'rgba(0, 0, 0, 0.34)',
+  sendBtnBg: '#C65316',
+  backgroundColor: '#C65316',
 };
 
 export const highContrastTheme = {
+  statusBarStyle: 'dark-content',
   sidebarBg: '#FFFFFF',
+  sidebarText: '#000000',
+  sidebarMuted: '#111111',
+  sidebarSurface: '#F2F2F2',
+  sidebarActiveBg: '#E6F0FF',
+  sidebarActiveText: '#000000',
+  sidebarBorder: '#000000',
+  brandMarkBg: '#003B73',
   mainBg: '#FFFFFF',
   headerBg: '#FFFFFF',
   cardBg: '#FFFFFF',
+  surfaceMuted: '#F2F2F2',
+  surfaceRaised: '#FFFFFF',
   textPrimary: '#000000',
-  textSecondary: '#1F2937',
+  textSecondary: '#111111',
   accent: '#003B73',
+  accentHover: '#003B73',
+  accentSoft: '#DCEBFF',
+  onAccent: '#FFFFFF',
+  artGold: '#003B73',
+  artRose: '#111111',
+  artPlum: '#000000',
+  heroBg: '#000000',
+  heroText: '#FFFFFF',
+  heroMuted: '#FFFFFF',
   searchBg: '#FFFFFF',
   borderColor: '#000000',
   menuActiveBg: '#E6F0FF',
+  focusRing: '#000000',
+  success: '#005A2B',
+  warning: '#6B3E00',
+  danger: '#8B0000',
+  overlay: 'rgba(0, 0, 0, 0.65)',
+  shadowColor: 'rgba(0, 0, 0, 0)',
+  shadowStrong: 'rgba(0, 0, 0, 0)',
   sendBtnBg: '#003B73',
   backgroundColor: '#003B73',
 };
@@ -124,9 +201,23 @@ export const ThemeProvider = ({ children }) => {
         *, *:before, *:after {
           transition: background-color 0.4s ease, color 0.4s ease, border-color 0.4s ease, fill 0.4s ease, stroke 0.4s ease !important;
         }
+
+        *:focus-visible {
+          outline: 3px solid ${theme.focusRing} !important;
+          outline-offset: 3px !important;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          *, *:before, *:after {
+            scroll-behavior: auto !important;
+            transition-duration: 0.01ms !important;
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+          }
+        }
       `;
     }
-  }, []);
+  }, [theme.focusRing]);
 
   return (
     <ThemeContext.Provider value={{ isLightMode, toggleTheme, theme }}>

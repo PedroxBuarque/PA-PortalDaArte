@@ -1,0 +1,34 @@
+PORTAL DA ARTE - CORRECAO DA TELA EXPLORAR E FILTROS
+Data: 20/11/2026
+
+Ajustes desta revisao:
+
+1. Explorar em 100% de zoom
+- Corrigido o comportamento em notebooks e resolucoes como 1366x768.
+- Os cards nao precisam mais de zoom 80% para serem visualizados corretamente.
+- A imagem do artista possui altura minima estavel e nao encolhe verticalmente.
+- O numero de colunas e calculado pela largura realmente disponivel depois da Sidebar e dos filtros.
+
+2. Cabecalho do catalogo
+- Hero, Catalogo, titulo, quantidade de resultados, filtros e ordenacao fazem parte da mesma lista rolavel dos artistas.
+- Removidos z-index exagerados que podiam fazer essa area parecer sobreposta aos cards.
+- Ao rolar a pagina, essa area sobe junto e libera o espaco para os artistas.
+
+3. Filtros recolhiveis
+- O painel de filtros inicia fechado.
+- Botao Filtros abre e fecha o painel.
+- Em telas muito largas, o filtro pode aparecer como coluna lateral e ser ocultado novamente.
+- Em notebooks/mobile, abre como painel/modal sem espremer os cards.
+- Esconder o painel nao apaga os filtros selecionados.
+- O botao mostra a quantidade de filtros ativos, por exemplo: Filtros (2).
+- Dentro do painel ha uma acao explicita Fechar/Ocultar.
+
+4. Validacoes
+- TypeScript: 0 erros.
+- Expo Web: 19 rotas exportadas com sucesso.
+- Expo Android: bundle concluido com sucesso.
+- Expo iOS: bundle concluido com sucesso.
+- Auditoria estatica de acessibilidade: 0 problemas ALTA / 0 problemas MEDIA.
+
+Observacao:
+- Os arquivos .env consolidados anteriormente foram mantidos nesta entrega, conforme solicitado.

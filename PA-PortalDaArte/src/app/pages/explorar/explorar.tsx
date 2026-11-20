@@ -8,8 +8,10 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useAuth } from "../../../components/context/AuthContext";
 import { useSearch } from "../../../components/context/SearchContext";
 import { useFavorites } from "../../../components/context/FavoritesContext";
+import { useCart } from "../../../components/context/CartContext";
 import { ARTIST_PROFILE_ROUTE, DISCOVER_ROUTE, FAVORITES_ROUTE } from "../../../constants/auth-routes";
 import { buildCategoryOptions, categoryKey } from "../../../constants/artist-categories";
+import { ArrowUpRight, ShoppingBag, SlidersHorizontal, Sparkles } from "lucide-react-native";
 
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -179,6 +181,20 @@ const normalizeArtist = (raw: any, index: number): Artist => {
   const searchableText = foldText([name, categoryText, serviceText, ...serviceDetails, style, raw.biografia, raw.bio, raw.instrumentos, raw.instruments, raw.descricao, raw.description]
     .map(toText).join(" "));
   const serviceTitles = uniqueNames(serviceRecords.map((service: any) => toText(service?.titulo ?? service?.nome)));
+  const serviceSummaries = serviceRecords.map((service: any) => {
+    const low = Number(firstValue(service?.preco_min, service?.preco, service?.price, 0)) || 0;
+    const rawHigh = firstValue(service?.preco_max, null);
+    const high = rawHigh == null ? low : Number(rawHigh) || 0;
+    return {
+      id: Number(service?.id) || 0,
+      title: toText(service?.titulo ?? service?.nome) || 'Serviço artístico',
+      description: toText(service?.descricao ?? service?.description) || '',
+      priceMin: low,
+      priceMax: high,
+      fixedPrice: low > 0 && high > 0 && Math.abs(low - high) < 0.005 ? low : null,
+      modality: String(service?.modalidade || raw.modalidade_atendimento || 'ambos'),
+    };
+  }).filter((service: any) => service.id > 0);
   // Modalidades atendidas: a do artista + a de cada serviço ("ambos" = presencial e remoto).
   const modalities = new Set<string>();
   [raw.modalidade_atendimento, raw.modalidade, ...serviceRecords.map((service: any) => service?.modalidade)].forEach((value) => {
@@ -215,6 +231,7 @@ const normalizeArtist = (raw: any, index: number): Artist => {
     categoryKeys: categoryNames.map(categoryKey),
     modalities: Array.from(modalities),
     serviceTitles,
+    services: serviceSummaries,
     distanceKm: Number(firstValue(raw.distanceKm, raw.distancia_km, raw.distancia, NaN)),
     city: textOrEmpty(raw.cidade_atendimento, raw.cidade, raw.city, raw.municipio, raw.nome_municipio, raw.localidade),
     state: textOrEmpty(raw.estado_atendimento, raw.estado, raw.state, raw.uf, raw.sigla_estado, raw.estado_sigla),
@@ -239,6 +256,7 @@ type Artist = {
   categoryKeys: string[];
   modalities: string[]; // "presencial" e/ou "remoto"
   serviceTitles: string[];
+  services: Array<{ id: number; title: string; description: string; priceMin: number; priceMax: number; fixedPrice: number | null; modality: string }>;
   distanceKm: number;
   city: string;
   state: string;
@@ -295,8 +313,12 @@ const buildServiceOptions = (artists: Artist[]): string[] => {
 export default function ExplorarScreen() {
   const { theme, isLightMode } = useTheme();
   const styles = getStyles(theme) as any;
-  const { width } = useWindowDimensions();
-  const isMobile = width < 900; // Define se é tela de celular/tablet pequeno
+  const { width, height } = useWindowDimensions();
+  const isMobile = width < 900;
+  const isCompactViewport = !isMobile && height <= 820;
+  // Em telas realmente largas o filtro pode ocupar uma coluna lateral.
+  // Em notebooks e telas menores ele abre como painel/modal para nunca espremer os cards.
+  const canUseFilterSidebar = width >= 1480;
   const params = useLocalSearchParams<{ search?: string }>();
   const router = useRouter();
   const { requireAuth, status } = useAuth();
@@ -336,9 +358,47 @@ export default function ExplorarScreen() {
   const [expandedFilters, setExpandedFilters] = useState<Record<string, boolean>>({ category: true, modality: true, service: true, price: true, rating: true, location: true });
   const [sort, setSort] = useState("rating");
   const [sortOpen, setSortOpen] = useState(false);
+  const [filtersVisible, setFiltersVisible] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [visibleCount, setVisibleCount] = useState(6);
   const { favoriteIds, isFavorite, addFavorite, removeFavorite, whenReady } = useFavorites();
+  const { addItem, hasService } = useCart();
+  const [cartNotice, setCartNotice] = useState("");
+
+  const showFilterSidebar = canUseFilterSidebar && filtersVisible;
+  // O grid considera a largura REAL disponível depois da navegação e do painel de filtros.
+  // Esconder filtros devolve imediatamente a largura ao catálogo.
+  const estimatedContentWidth = width
+    - (showSidebar ? 236 : 0)
+    - (showFilterSidebar ? 330 : 0)
+    - (isMobile ? 28 : 48);
+  const gridColumns = estimatedContentWidth >= 1220 ? 3 : estimatedContentWidth >= 760 ? 2 : 1;
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (category !== ALL_CATEGORIES) count += 1;
+    if (modality !== "todas") count += 1;
+    if (serviceFilter !== ALL_SERVICES) count += 1;
+    if (Number(minPrice || 0) > 0 || maxPrice.trim()) count += 1;
+    if (ratingFilter > 0) count += 1;
+    if (distance !== 100) count += 1;
+    if (location !== ALL_LOCATIONS) count += 1;
+    return count;
+  }, [category, modality, serviceFilter, minPrice, maxPrice, ratingFilter, distance, location]);
+
+  const toggleFilters = () => {
+    if (canUseFilterSidebar) {
+      setFiltersVisible((current) => !current);
+      return;
+    }
+    setFilterModalVisible(true);
+  };
+
+  useEffect(() => {
+    // Se a janela for reduzida enquanto o painel lateral estiver aberto, fecha a coluna
+    // e deixa o filtro disponível pelo botão/modal.
+    if (!canUseFilterSidebar && filtersVisible) setFiltersVisible(false);
+  }, [canUseFilterSidebar, filtersVisible]);
 
   useEffect(() => {
     fetch("https://servicodados.ibge.gov.br/api/v1/localidades/estados?orderBy=nome")
@@ -603,11 +663,7 @@ export default function ExplorarScreen() {
 
   const openArtistProfile = (artist: Artist) => {
     const id = String(artist.id);
-    return requireAuth(
-      () => router.push({ pathname: ARTIST_PROFILE_ROUTE, params: { id } } as any),
-      `${ARTIST_PROFILE_ROUTE}?id=${encodeURIComponent(id)}`,
-      "login",
-    );
+    router.push({ pathname: ARTIST_PROFILE_ROUTE, params: { id } } as any);
   };
 
   const clearFilters = () => {
@@ -627,54 +683,119 @@ export default function ExplorarScreen() {
 
   const renderArtist = ({ item }: { item: Artist }) => {
     const isFav = favoriteIds.some((id) => String(id) === String(item.id));
+    const firstFixedService = item.services.find((service) => service.fixedPrice);
+    const servicePreview = item.services.slice(0, 2);
+
+    const addQuickService = () => {
+      if (!firstFixedService?.fixedPrice) {
+        openArtistProfile(item);
+        return;
+      }
+      const result = addItem({
+        serviceId: firstFixedService.id,
+        artistId: item.id,
+        artistName: item.name,
+        serviceTitle: firstFixedService.title,
+        description: firstFixedService.description || null,
+        price: firstFixedService.fixedPrice,
+        modality: firstFixedService.modality,
+        imageUrl: item.avatarUrl || null,
+      });
+      setCartNotice(result === 'exists'
+        ? `${firstFixedService.title} já está no carrinho.`
+        : `${firstFixedService.title} foi adicionado ao carrinho.`);
+    };
 
     return (
-      <View style={[styles.artistCard, isMobile && styles.artistCardMobile]}>
-        <TouchableOpacity
-          style={styles.cardHeart}
-          onPress={() => toggleFavorite(item)}
-          accessibilityRole="button"
-          accessibilityLabel={isFav ? `Remover ${item.name} dos favoritos` : `Adicionar ${item.name} aos favoritos`}
-          accessibilityState={{ checked: isFav }}
-        >
-          <Text style={isFav ? styles.heartIconActive : styles.heartIcon}>
-            {isFav ? "♥" : "♡"}
-          </Text>
-        </TouchableOpacity>
-        <View style={styles.avatarWrapper}>
-          <View
-            style={[
-              styles.avatarPlaceholder,
-              { backgroundColor: item.avatarColor },
-            ]}
-          >
+      <View style={[styles.artistCard, gridColumns === 3 && styles.artistCardThreeCols, gridColumns === 2 && styles.artistCardTwoCols, gridColumns === 1 && styles.artistCardMobile]}>
+        <View style={styles.artFrame}>
+          <View style={[styles.avatarPlaceholder, { backgroundColor: item.avatarColor }]}>
             {item.avatarUrl ? (
-              <Image source={{ uri: item.avatarUrl }} style={styles.artistAvatarImage}
-                accessible={false} />
+              <Image source={{ uri: item.avatarUrl }} style={styles.artistAvatarImage} resizeMode="cover" accessible={false} />
             ) : (
               <Text style={styles.avatarEmoji}>{item.emoji}</Text>
             )}
           </View>
-          {item.style ? (
-            <View style={styles.tag}>
-              <Text style={styles.tagText}>{item.style}</Text>
-            </View>
-          ) : null}
+
+          <TouchableOpacity
+            style={styles.cardHeart}
+            onPress={() => toggleFavorite(item)}
+            accessibilityRole="button"
+            accessibilityLabel={isFav ? `Remover ${item.name} dos favoritos` : `Adicionar ${item.name} aos favoritos`}
+            accessibilityState={{ checked: isFav }}
+          >
+            <Text style={isFav ? styles.heartIconActive : styles.heartIcon}>{isFav ? "♥" : "♡"}</Text>
+          </TouchableOpacity>
+
+          <View style={styles.imageScrim} accessible={false} />
+          <View style={styles.artistImageCaption}>
+            <Text style={styles.artistImageEyebrow}>{item.style || item.category}</Text>
+            {item.city ? <Text style={styles.artistImageLocation}>{item.city}{item.state ? ` · ${item.state}` : ''}</Text> : null}
+          </View>
         </View>
-        <Text style={styles.artistName}>{item.name}</Text>
-        <Text style={styles.artistRating}>
-          {item.rating > 0 ? <>⭐ <Text style={styles.ratingBold}>{item.rating.toFixed(1).replace(".", ",")}</Text> <Text style={styles.ratingCount}>({item.reviews})</Text></> : <Text style={styles.ratingCount}>Ainda sem avaliações</Text>}
-        </Text>
-        <Text style={styles.artistPrice}>{item.price > 0 ? `${formatPrice(item.price)}/hora` : "Preço a combinar"}</Text>
-        {Number.isFinite(item.distanceKm) ? <Text style={styles.artistDistance}>{item.distanceKm.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km de distância</Text> : null}
-        <TouchableOpacity
-          style={styles.profileButton}
-          activeOpacity={0.85}
-          onPress={() => openArtistProfile(item)}
-          accessibilityRole="button"
-        >
-          <Text style={styles.profileButtonText}>Ver perfil</Text>
-        </TouchableOpacity>
+
+        <View style={styles.artistCardBody}>
+          <View style={styles.artistOverlineRow}>
+            <Text style={styles.artistOverline}>ARTISTA INDEPENDENTE</Text>
+            <Text style={styles.artistRatingCompact}>
+              {item.rating > 0 ? `★ ${item.rating.toFixed(1).replace(".", ",")}` : "Novo por aqui"}
+            </Text>
+          </View>
+
+          <Text style={styles.artistName} numberOfLines={2}>{item.name}</Text>
+
+          {servicePreview.length ? (
+            <View style={styles.servicePreviewList}>
+              {servicePreview.map((service) => (
+                <View key={service.id} style={styles.servicePreviewPill}>
+                  <Text style={styles.servicePreviewText} numberOfLines={1}>{service.title}</Text>
+                </View>
+              ))}
+              {item.services.length > 2 ? <Text style={styles.moreServices}>+{item.services.length - 2}</Text> : null}
+            </View>
+          ) : (
+            <Text style={styles.noServicesText}>Perfil disponível para orçamento</Text>
+          )}
+
+          <View style={styles.artistMetaRow}>
+            <Text style={styles.ratingCount}>
+              {item.rating > 0 ? `${item.reviews} avaliação${item.reviews === 1 ? "" : "ões"}` : "Ainda sem avaliações"}
+            </Text>
+            {Number.isFinite(item.distanceKm) ? (
+              <Text style={styles.artistDistance}>{item.distanceKm.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km</Text>
+            ) : null}
+          </View>
+
+          <View style={styles.artistCardFooter}>
+            <View style={styles.priceBlock}>
+              <Text style={styles.priceEyebrow}>{item.price > 0 ? "A PARTIR DE" : "VALOR"}</Text>
+              <Text style={styles.artistPrice}>{item.price > 0 ? formatPrice(item.price) : "A combinar"}</Text>
+            </View>
+            <View style={styles.cardActions}>
+              {firstFixedService?.fixedPrice ? (
+                <TouchableOpacity
+                  style={[styles.quickCartButton, hasService(firstFixedService.id) && styles.quickCartButtonActive]}
+                  activeOpacity={0.82}
+                  onPress={addQuickService}
+                  accessibilityRole="button"
+                  accessibilityLabel={hasService(firstFixedService.id) ? `${firstFixedService.title} já está no carrinho` : `Adicionar ${firstFixedService.title} ao carrinho`}
+                >
+                  <ShoppingBag size={16} color={hasService(firstFixedService.id) ? theme.onAccent || '#FFFFFF' : theme.accent} accessible={false} />
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                style={styles.profileButton}
+                activeOpacity={0.85}
+                onPress={() => openArtistProfile(item)}
+                accessibilityRole="button"
+                accessibilityLabel={`Ver perfil e serviços de ${item.name}`}
+              >
+                <Text style={styles.profileButtonText}>Ver serviços</Text>
+                <ArrowUpRight size={16} color={theme.onAccent || "#FFFFFF"} accessible={false} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </View>
     );
   };
@@ -683,10 +804,22 @@ export default function ExplorarScreen() {
     <ScrollView style={styles.filterScroll} showsVerticalScrollIndicator={false} persistentScrollbar={false} nestedScrollEnabled>
       <View style={styles.filterHeader}>
         <Text style={styles.filterTitle}>Filtros</Text>
-        <TouchableOpacity onPress={clearFilters}
-          accessibilityRole="button">
-          <Text style={styles.clearFilters}>Limpar</Text>
-        </TouchableOpacity>
+        <View style={styles.filterHeaderActions}>
+          <TouchableOpacity onPress={clearFilters} accessibilityRole="button">
+            <Text style={styles.clearFilters}>Limpar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => {
+              if (showFilterSidebar) setFiltersVisible(false);
+              else setFilterModalVisible(false);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={showFilterSidebar ? "Ocultar filtros" : "Fechar filtros"}
+            style={styles.hideFiltersButton}
+          >
+            <Text style={styles.hideFiltersButtonText}>{showFilterSidebar ? "Ocultar" : "Fechar"}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.filterBlock}>
@@ -905,7 +1038,7 @@ export default function ExplorarScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar
-        barStyle={isLightMode ? "dark-content" : "light-content"}
+        barStyle={theme.statusBarStyle || (isLightMode ? "dark-content" : "light-content")}
         backgroundColor={theme.headerBg || theme.mainBg}
       />
 
@@ -917,89 +1050,126 @@ export default function ExplorarScreen() {
 
           <View style={styles.mainContent}>
             <View
-              style={[styles.centerArea, isMobile && styles.centerAreaMobile]}
+              style={[styles.centerArea, isMobile && styles.centerAreaMobile, isCompactViewport && styles.centerAreaCompact]}
             >
-              <View style={styles.pageHeader}>
-                <View style={styles.titleRow}>
-                  <Text style={styles.pageTitle}>Descobrir Artistas</Text>
-                  {isMobile && (
-                    <TouchableOpacity
-                      style={styles.mobileFilterBtn}
-                      onPress={() => setFilterModalVisible(true)}
-                      accessibilityRole="button"
-                    >
-                      <Text style={styles.mobileFilterBtnText}>⚙️ Filtrar</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+              <FlatList
+                ListHeaderComponent={
+                  <>
+                    <View style={[styles.heroPanel, isMobile && styles.heroPanelMobile, isCompactViewport && styles.heroPanelCompact]}>
+                    <View style={styles.heroOrbOne} accessible={false} />
+                    <View style={styles.heroOrbTwo} accessible={false} />
+                    <View style={styles.heroContent}>
+                    <View style={styles.heroEyebrowRow}>
+                    <Sparkles size={15} color={theme.artGold || "#B94A0A"} accessible={false} />
+                    <Text style={styles.heroEyebrow}>CURADORIA ABERTA</Text>
+                    </View>
+                    <Text style={[styles.heroTitle, isMobile && styles.heroTitleMobile, isCompactViewport && styles.heroTitleCompact]}>Encontre o talento que dá forma à sua ideia.</Text>
+                    <Text style={styles.heroDescription}>
+                    Descubra artistas independentes, compare estilos e encontre a pessoa certa para transformar seu projeto em experiência.
+                    </Text>
+                    </View>
+                    <View style={styles.heroStat}>
+                    <Text style={styles.heroStatNumber}>{filteredArtists.length}</Text>
+                    <Text style={styles.heroStatLabel}>talentos nesta busca</Text>
+                    </View>
+                    </View>
 
-                <View style={styles.pageSubHeader}>
-                  <Text style={styles.resultCount}>
+                    <View style={styles.pageHeader}>
+                    <View style={styles.titleRow}>
+                    <View>
+                    <Text style={styles.sectionEyebrow}>CATÁLOGO</Text>
+                    <Text style={styles.pageTitle}>Artistas para descobrir</Text>
+                    </View>
+                    <TouchableOpacity
+                    style={[styles.mobileFilterBtn, showFilterSidebar && styles.filterToggleActive]}
+                    onPress={toggleFilters}
+                    accessibilityRole="button"
+                    accessibilityLabel={showFilterSidebar ? "Ocultar filtros" : "Mostrar filtros"}
+                    accessibilityState={{ expanded: showFilterSidebar || filterModalVisible }}
+                    >
+                    <SlidersHorizontal size={16} color={showFilterSidebar ? (theme.onAccent || "#FFFFFF") : theme.textPrimary} accessible={false} />
+                    <Text style={[styles.mobileFilterBtnText, showFilterSidebar && styles.filterToggleActiveText]}>
+                      {showFilterSidebar ? "Ocultar filtros" : activeFilterCount > 0 ? `Filtros (${activeFilterCount})` : "Filtros"}
+                    </Text>
+                    </TouchableOpacity>
+                    </View>
+
+                    <View style={[styles.pageSubHeader, isMobile && styles.pageSubHeaderMobile]}>
+                    <Text style={styles.resultCount}>
                     {filteredArtists.length}{" "}
                     <Text style={styles.resultCountNormal}>
-                      artistas encontrados
+                    resultado{filteredArtists.length === 1 ? "" : "s"} encontrado{filteredArtists.length === 1 ? "" : "s"}
                     </Text>
-                  </Text>
+                    </Text>
 
-                  <View style={styles.sortWrapper}>
+                    <View style={styles.sortWrapper}>
                     <TouchableOpacity
-                      style={styles.sortDropdown}
-                      onPress={() => setSortOpen((value) => !value)}
-                      accessibilityRole="button"
+                    style={styles.sortDropdown}
+                    onPress={() => setSortOpen((value) => !value)}
+                    accessibilityRole="button"
                     >
-                      <Text style={styles.sortText}>
-                        Ordenar:{" "}
-                        <Text style={styles.sortStrong}>
-                          {
-                            SORT_OPTIONS.find((option) => option.id === sort)
-                              ?.label
-                          }
-                        </Text>{" "}
-                        ▼
-                      </Text>
+                    <Text style={styles.sortText}>
+                    Ordenar:{" "}
+                    <Text style={styles.sortStrong}>
+                    {
+                    SORT_OPTIONS.find((option) => option.id === sort)
+                    ?.label
+                    }
+                    </Text>{" "}
+                    ▼
+                    </Text>
                     </TouchableOpacity>
                     {sortOpen && (
-                      <View style={styles.sortMenu}>
-                        {SORT_OPTIONS.map((option) => (
-                          <TouchableOpacity
-                            key={option.id}
-                            style={[
-                              styles.sortOption,
-                              sort === option.id && styles.sortOptionActive,
-                            ]}
-                            onPress={() => {
-                              setSort(option.id);
-                              setSortOpen(false);
-                            }}
-                            accessibilityRole="button"
-                          >
-                            <Text
-                              style={
-                                sort === option.id
-                                  ? styles.sortOptionTextActive
-                                  : styles.sortOptionText
-                              }
-                            >
-                              {option.label}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
+                    <View style={styles.sortMenu}>
+                    {SORT_OPTIONS.map((option) => (
+                    <TouchableOpacity
+                    key={option.id}
+                    style={[
+                    styles.sortOption,
+                    sort === option.id && styles.sortOptionActive,
+                    ]}
+                    onPress={() => {
+                    setSort(option.id);
+                    setSortOpen(false);
+                    }}
+                    accessibilityRole="button"
+                    >
+                    <Text
+                    style={
+                    sort === option.id
+                    ? styles.sortOptionTextActive
+                    : styles.sortOptionText
+                    }
+                    >
+                    {option.label}
+                    </Text>
+                    </TouchableOpacity>
+                    ))}
+                    </View>
                     )}
-                  </View>
-                </View>
-              </View>
+                    </View>
+                    </View>
+                    </View>
 
-              <FlatList
+                    {cartNotice ? (
+                    <View style={styles.cartNotice} accessibilityLiveRegion="polite">
+                    <ShoppingBag size={16} color={theme.accent} accessible={false} />
+                    <Text style={styles.cartNoticeText}>{cartNotice}</Text>
+                    <TouchableOpacity onPress={() => router.push('/pages/carrinho/carrinho' as any)} accessibilityRole="button"><Text style={styles.cartNoticeAction}>Ver carrinho</Text></TouchableOpacity>
+                    </View>
+                    ) : null}
+                  </>
+                }
                 data={visibleArtists}
                 keyExtractor={(item) => String(item.id)}
                 renderItem={renderArtist}
-                numColumns={isMobile ? 1 : 3}
-                key={isMobile ? "one-col" : "three-col"}
-                columnWrapperStyle={!isMobile ? styles.gridRow : undefined}
+                numColumns={gridColumns}
+                key={`artist-grid-${gridColumns}`}
+                columnWrapperStyle={gridColumns > 1 ? styles.gridRow : undefined}
                 contentContainerStyle={styles.gridContainer}
                 style={styles.gridScroll}
                 showsVerticalScrollIndicator={false}
+                removeClippedSubviews={false}
                 onEndReached={loadMore}
                 onEndReachedThreshold={0.55}
                 refreshing={refreshing}
@@ -1049,7 +1219,7 @@ export default function ExplorarScreen() {
             </View>
 
             {/* FILTRO LATERAL APENAS PARA DESKTOP/TELA GRANDE */}
-            {!isMobile && (
+            {showFilterSidebar && (
               <View style={styles.filterSidebarContainer}>
                 <View style={styles.filterSidebar}>
                   {renderFilterContent()}
@@ -1058,7 +1228,7 @@ export default function ExplorarScreen() {
             )}
 
             {/* MODAL DE FILTRO PARA MOBILE */}
-            {isMobile && (
+            {!canUseFilterSidebar && (
               <Modal
                 visible={filterModalVisible}
                 animationType="slide"
@@ -1098,7 +1268,7 @@ export default function ExplorarScreen() {
                     <Text style={[styles.locationListItemText, location === ALL_LOCATIONS && { color: theme.accent, fontWeight: "700" }]}>Todas as localidades</Text>
                   </TouchableOpacity>
                   <TextInput value={locationSearch} onChangeText={setLocationSearch} style={styles.locationSearchInput} placeholder={locationStep === "state" ? "Buscar estado..." : "Buscar cidade..."} placeholderTextColor={theme.textSecondary}
-                    accessibilityLabel={"Todas as localidades"} />
+                    accessibilityLabel={locationStep === "state" ? "Buscar estado" : "Buscar cidade"} />
                   {locationStep === "city" && <TouchableOpacity style={styles.backToStates} onPress={() => { setLocationStep("state"); setLocationSearch(""); }}
                     accessibilityRole="button"><Text style={styles.clearFilters}>← Escolher outro estado</Text></TouchableOpacity>}
                   <ScrollView style={styles.locationList} keyboardShouldPersistTaps="handled">
@@ -1134,171 +1304,274 @@ const getStyles = (theme: any) =>
     mainContent: { flex: 1, flexDirection: "row", minHeight: 0, zIndex: 1 },
     centerArea: {
       flex: 1,
-      padding: 32,
+      padding: 24,
       minWidth: 0,
       minHeight: 0,
       overflow: "visible",
     },
-    centerAreaMobile: { padding: 16 },
-    pageHeader: { marginBottom: 20, zIndex: 9999, overflow: "visible" },
+    centerAreaMobile: { padding: 14 },
+    centerAreaCompact: { paddingTop: 16, paddingBottom: 16 },
+    heroPanel: {
+      minHeight: 188,
+      backgroundColor: theme.heroBg || theme.textPrimary,
+      borderRadius: 24,
+      padding: 26,
+      marginBottom: 24,
+      borderWidth: 1,
+      borderColor: theme.borderColor,
+      overflow: "hidden",
+      flexDirection: "row",
+      alignItems: "flex-end",
+      justifyContent: "space-between",
+      gap: 20,
+      position: "relative",
+      ...Platform.select({ web: { boxShadow: `0 10px 28px ${theme.shadowColor}` } }),
+    },
+    heroPanelMobile: { minHeight: 0, padding: 20, borderRadius: 22, flexDirection: "column", alignItems: "flex-start" },
+    heroPanelCompact: { minHeight: 142, paddingVertical: 20, marginBottom: 16 },
+    heroOrbOne: {
+      position: "absolute",
+      width: 220,
+      height: 220,
+      borderRadius: 110,
+      backgroundColor: theme.accent,
+      opacity: 0.16,
+      right: -46,
+      top: -92,
+    },
+    heroOrbTwo: {
+      position: "absolute",
+      width: 130,
+      height: 130,
+      borderRadius: 65,
+      backgroundColor: theme.artGold || "#B94A0A",
+      opacity: 0.15,
+      right: 155,
+      bottom: -78,
+    },
+    heroContent: { flex: 1, maxWidth: 670, zIndex: 2 },
+    heroEyebrowRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 13 },
+    heroEyebrow: { color: theme.artGold || "#B94A0A", fontSize: 10, fontWeight: "900", letterSpacing: 1.6 },
+    heroTitle: {
+      color: theme.heroText || "#FFFFFF",
+      fontFamily: "serif",
+      fontSize: 34,
+      lineHeight: 40,
+      fontWeight: "900",
+      letterSpacing: -0.8,
+      maxWidth: 620,
+    },
+    heroTitleMobile: { fontSize: 28, lineHeight: 33 },
+    heroTitleCompact: { fontSize: 29, lineHeight: 34, maxWidth: 560 },
+    heroDescription: { color: theme.heroMuted || "#E6D8CF", fontSize: 13, lineHeight: 20, marginTop: 12, maxWidth: 590 },
+    heroStat: {
+      minWidth: 132,
+      backgroundColor: theme.cardBg,
+      borderWidth: 1,
+      borderColor: theme.borderColor,
+      borderRadius: 20,
+      paddingHorizontal: 18,
+      paddingVertical: 16,
+      zIndex: 2,
+    },
+    heroStatNumber: { color: theme.heroText || "#FFFFFF", fontSize: 28, fontWeight: "900", fontFamily: "serif" },
+    heroStatLabel: { color: theme.heroMuted || "#E6D8CF", fontSize: 10, lineHeight: 14, marginTop: 2, maxWidth: 90 },
+    pageHeader: { marginBottom: 20 },
     titleRow: {
       flexDirection: "row",
       justifyContent: "space-between",
-      alignItems: "center",
+      alignItems: "flex-end",
       marginBottom: 15,
+      gap: 12,
+      flexWrap: "wrap",
     },
+    sectionEyebrow: { color: theme.accent, fontSize: 9, fontWeight: "900", letterSpacing: 1.6, marginBottom: 4 },
     pageTitle: {
       fontSize: 28,
       fontWeight: "900",
       color: theme.textPrimary,
       fontFamily: "serif",
+      letterSpacing: -0.5,
     },
     mobileFilterBtn: {
+      minHeight: 42,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
       backgroundColor: theme.cardBg,
       borderWidth: 1,
       borderColor: theme.borderColor,
       paddingHorizontal: 14,
       paddingVertical: 8,
-      borderRadius: 20,
+      borderRadius: 14,
     },
-    mobileFilterBtnText: {
-      color: theme.textPrimary,
-      fontWeight: "bold",
-      fontSize: 13,
-    },
+    mobileFilterBtnText: { color: theme.textPrimary, fontWeight: "800", fontSize: 13 },
+    filterToggleActive: { backgroundColor: theme.accent, borderColor: theme.accent },
+    filterToggleActiveText: { color: theme.onAccent || "#FFFFFF" },
     pageSubHeader: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
       gap: 16,
-      zIndex: 9999,
-      overflow: "visible",
+      zIndex: 2,
     },
-    resultCount: { fontSize: 15, fontWeight: "bold", color: theme.textPrimary },
-    resultCountNormal: { fontWeight: "normal", color: theme.textSecondary },
+    pageSubHeaderMobile: { alignItems: "stretch", flexDirection: "column", gap: 10 },
+    resultCount: { fontSize: 13, fontWeight: "800", color: theme.textPrimary },
+    resultCountNormal: { fontWeight: "500", color: theme.textSecondary },
 
-    sortWrapper: { position: "relative", zIndex: 99999, elevation: 9999 },
+    sortWrapper: { position: "relative", zIndex: 20, elevation: 20 },
     sortDropdown: {
+      minHeight: 42,
+      justifyContent: "center",
       backgroundColor: theme.cardBg,
       paddingVertical: 8,
       paddingHorizontal: 14,
-      borderRadius: 20,
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: theme.borderColor,
     },
-    sortText: { color: theme.textSecondary, fontSize: 13 },
-    sortStrong: { fontWeight: "bold", color: theme.textPrimary },
+    sortText: { color: theme.textSecondary, fontSize: 12 },
+    sortStrong: { fontWeight: "800", color: theme.textPrimary },
     sortMenu: {
       position: "absolute",
-      top: 42,
+      top: 46,
       right: 0,
-      width: 180,
+      width: 190,
       backgroundColor: theme.cardBg,
       borderWidth: 1,
       borderColor: theme.borderColor,
-      borderRadius: 12,
-      paddingVertical: 6,
-      zIndex: 999999,
-      elevation: 50,
-      ...Platform.select({
-        web: { boxShadow: "0 10px 30px rgba(0,0,0,0.25)" },
-      }),
-    },
-    sortOption: { paddingHorizontal: 14, paddingVertical: 10 },
-    sortOptionActive: { backgroundColor: theme.menuActiveBg },
-    sortOptionText: { color: theme.textSecondary, fontSize: 12 },
-    sortOptionTextActive: {
-      color: theme.accent,
-      fontSize: 12,
-      fontWeight: "700",
-    },
-    gridScroll: { flex: 1, zIndex: 1 },
-    gridContainer: { paddingBottom: 20, zIndex: 1 },
-    gridRow: { justifyContent: "flex-start", gap: 18, marginBottom: 18 },
-    artistCard: {
-      flex: 1,
-      width: "32%",
-      maxWidth: "32%",
-      backgroundColor: theme.cardBg,
       borderRadius: 16,
-      padding: 20,
-      alignItems: "center",
+      paddingVertical: 7,
+      zIndex: 40,
+      elevation: 40,
+      ...Platform.select({ web: { boxShadow: `0 18px 38px ${theme.shadowStrong || theme.shadowColor}` } }),
+    },
+    sortOption: { paddingHorizontal: 14, paddingVertical: 11 },
+    sortOptionActive: { backgroundColor: theme.accentSoft || theme.menuActiveBg },
+    sortOptionText: { color: theme.textSecondary, fontSize: 12 },
+    sortOptionTextActive: { color: theme.accent, fontSize: 12, fontWeight: "800" },
+    gridScroll: { flex: 1, zIndex: 1 },
+    gridContainer: { paddingBottom: 36, paddingHorizontal: 1, zIndex: 1 },
+    gridRow: { justifyContent: "space-between", marginBottom: 18, width: "100%" },
+    artistCard: {
+      flexGrow: 0,
+      flexShrink: 0,
+      width: "100%",
+      maxWidth: "100%",
+      backgroundColor: theme.cardBg,
+      borderRadius: 20,
+      overflow: "hidden",
       borderWidth: 1,
       borderColor: theme.borderColor,
-      minHeight: 330,
+      minHeight: 414,
       zIndex: 1,
+      ...Platform.select({ web: { boxShadow: `0 12px 32px ${theme.shadowColor || "rgba(0,0,0,0.08)"}` } }),
     },
-    artistCardMobile: {
-      maxWidth: "100%",
-      width: "100%",
-      marginBottom: 16,
-    },
-    cardHeart: {
-      position: "absolute",
-      top: 16,
-      right: 16,
-      zIndex: 10,
-      padding: 4,
-    },
-    heartIcon: { fontSize: 22, color: theme.textSecondary },
-    heartIconActive: { fontSize: 22, color: theme.accent },
-    avatarWrapper: { alignItems: "center", marginBottom: 12 },
-    artistAvatarImage: { width: "100%", height: "100%", borderRadius: 44 },
+    artistCardThreeCols: { maxWidth: "32%", width: "32%" },
+    artistCardTwoCols: { maxWidth: "49%", width: "49%" },
+    artistCardMobile: { maxWidth: "100%", width: "100%", marginBottom: 14 },
+    artFrame: { height: 218, minHeight: 218, flexShrink: 0, margin: 0, position: "relative", overflow: "hidden" },
     avatarPlaceholder: {
-      width: 88,
-      height: 88,
-      borderRadius: 44,
+      width: "100%",
+      height: "100%",
+      borderRadius: 0,
       justifyContent: "center",
       alignItems: "center",
-      zIndex: 1,
+      overflow: "hidden",
     },
-    avatarEmoji: { fontSize: 40 },
-    tag: {
-      backgroundColor: theme.accent,
-      paddingVertical: 5,
-      paddingHorizontal: 12,
-      borderRadius: 16,
-      zIndex: 2,
-      marginTop: -14,
-      borderWidth: 2,
-      borderColor: theme.cardBg,
-    },
-    tagText: { color: "#FFF", fontSize: 11, fontWeight: "bold" },
-    artistName: {
-      fontSize: 17,
-      fontWeight: "bold",
-      color: theme.textPrimary,
-      marginBottom: 7,
-      textAlign: "center",
-    },
-    artistRating: { fontSize: 13, color: theme.textSecondary, marginBottom: 5 },
-    ratingBold: { color: theme.accent, fontWeight: "bold" },
-    ratingCount: { color: theme.textSecondary },
-    artistPrice: {
-      color: theme.textPrimary,
-      fontSize: 13,
-      fontWeight: "700",
-      marginBottom: 3,
-    },
-    artistDistance: {
-      color: theme.textSecondary,
-      fontSize: 12,
-      marginBottom: 15,
-    },
-    profileButton: {
-      backgroundColor: theme.accent,
-      width: "100%",
-      paddingVertical: 11,
-      borderRadius: 30,
+    artistAvatarImage: { width: "100%", height: "100%" },
+    avatarEmoji: { fontSize: 54 },
+    cardHeart: {
+      position: "absolute",
+      top: 10,
+      right: 10,
+      zIndex: 10,
+      width: 38,
+      height: 38,
+      borderRadius: 13,
       alignItems: "center",
-      marginTop: "auto",
+      justifyContent: "center",
+      backgroundColor: theme.cardBg,
+      borderWidth: 1,
+      borderColor: theme.borderColor,
+      ...Platform.select({ web: { boxShadow: `0 8px 18px ${theme.shadowColor}` } }),
     },
-    profileButtonText: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
+    heartIcon: { fontSize: 20, color: theme.textSecondary },
+    heartIconActive: { fontSize: 20, color: theme.accent },
+    imageScrim: { position: "absolute", left: 0, right: 0, bottom: 0, height: "48%", backgroundColor: "rgba(20,12,8,0.36)" },
+    artistImageCaption: { position: "absolute", left: 13, right: 13, bottom: 12 },
+    artistImageEyebrow: { color: "#FFFFFF", fontSize: 11, fontWeight: "900" },
+    artistImageLocation: { color: "rgba(255,255,255,0.82)", fontSize: 9.5, marginTop: 3 },
+    tag: {
+      position: "absolute",
+      left: 10,
+      bottom: 10,
+      backgroundColor: theme.heroBg || theme.textPrimary,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: 10,
+      maxWidth: "78%",
+    },
+    tagText: { color: theme.heroText || "#FFFFFF", fontSize: 9, fontWeight: "800", letterSpacing: 0.3 },
+    artistCardBody: { paddingHorizontal: 17, paddingTop: 15, paddingBottom: 16, flex: 1 },
+    artistOverlineRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+    artistOverline: { color: theme.accent, fontSize: 8, fontWeight: "900", letterSpacing: 1.1 },
+    artistRatingCompact: { color: theme.textSecondary, fontSize: 10, fontWeight: "700" },
+    artistName: {
+      fontSize: 19,
+      lineHeight: 23,
+      fontWeight: "900",
+      color: theme.textPrimary,
+      marginTop: 7,
+      marginBottom: 6,
+      fontFamily: "serif",
+      letterSpacing: -0.35,
+    },
+    servicePreviewList: { minHeight: 29, flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3, marginBottom: 10, overflow: "hidden" },
+    servicePreviewPill: { maxWidth: "44%", paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, backgroundColor: theme.surfaceMuted || theme.mainBg, borderWidth: 1, borderColor: theme.borderColor },
+    servicePreviewText: { color: theme.textPrimary, fontSize: 9.5, fontWeight: "700" },
+    moreServices: { color: theme.textSecondary, fontSize: 10, fontWeight: "800" },
+    noServicesText: { color: theme.textSecondary, fontSize: 10.5, marginTop: 4, marginBottom: 11 },
+    artistMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 15 },
+    ratingCount: { color: theme.textSecondary, fontSize: 10.5 },
+    artistDistance: { color: theme.textSecondary, fontSize: 10.5, fontWeight: "700" },
+    artistCardFooter: {
+      marginTop: "auto",
+      paddingTop: 14,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.borderColor,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10,
+    },
+    priceBlock: { flex: 1, minWidth: 0 },
+    cardActions: { flexDirection: "row", alignItems: "center", gap: 7 },
+    quickCartButton: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: theme.accentSoft || theme.mainBg, borderWidth: 1, borderColor: theme.borderColor },
+    quickCartButtonActive: { backgroundColor: theme.accent, borderColor: theme.accent },
+    priceEyebrow: { color: theme.textSecondary, fontSize: 7.5, fontWeight: "900", letterSpacing: 1.1, marginBottom: 2 },
+    artistPrice: { color: theme.textPrimary, fontSize: 13, fontWeight: "900" },
+    profileButton: {
+      minHeight: 42,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      backgroundColor: theme.accent,
+      paddingHorizontal: 13,
+      paddingVertical: 9,
+      borderRadius: 13,
+    },
+    profileButtonText: { color: theme.onAccent || "#FFFFFF", fontWeight: "800", fontSize: 12 },
+    cartNotice: { minHeight: 46, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 14, paddingHorizontal: 13, paddingVertical: 9, marginBottom: 14 },
+    cartNoticeText: { flex: 1, color: theme.textPrimary, fontSize: 11, lineHeight: 16 },
+    cartNoticeAction: { color: theme.accent, fontSize: 11, fontWeight: "900" },
     retryButton: {
       backgroundColor: theme.accent,
       paddingVertical: 11,
       paddingHorizontal: 26,
-      borderRadius: 30,
+      borderRadius: 12,
       alignItems: "center",
       marginTop: 18,
     },
@@ -1323,7 +1596,7 @@ const getStyles = (theme: any) =>
     },
 
     filterSidebarContainer: {
-      width: 320,
+      width: 306,
       paddingVertical: 24,
       paddingRight: 24,
       backgroundColor: theme.mainBg,
@@ -1344,7 +1617,7 @@ const getStyles = (theme: any) =>
     },
     modalOverlay: {
       flex: 1,
-      backgroundColor: "rgba(0,0,0,0.5)",
+      backgroundColor: theme.overlay || "rgba(0,0,0,0.5)",
       justifyContent: "flex-end",
     },
     modalContent: {
@@ -1368,9 +1641,21 @@ const getStyles = (theme: any) =>
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
+      gap: 12,
       marginBottom: 20,
       paddingTop: 10,
     },
+    filterHeaderActions: { flexDirection: "row", alignItems: "center", gap: 10 },
+    hideFiltersButton: {
+      minHeight: 34,
+      justifyContent: "center",
+      paddingHorizontal: 11,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: theme.borderColor,
+      backgroundColor: theme.mainBg,
+    },
+    hideFiltersButtonText: { color: theme.textPrimary, fontSize: 12, fontWeight: "800" },
     filterTitle: {
       fontSize: 20,
       fontWeight: "900",

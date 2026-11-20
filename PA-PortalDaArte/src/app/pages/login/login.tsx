@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, SafeAreaView, StyleSheet, type TextInputProps, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, SafeAreaView, StyleSheet, type TextInputProps, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { AccessibleTextInput as TextInput } from '../../../components/accessibility/AccessibleTextInput';
 import { router, useLocalSearchParams, useNavigationContainerRef } from "expo-router";
 import Head from "expo-router/head";
@@ -7,6 +7,7 @@ import { ArrowLeft, Lock, Mail } from "lucide-react-native";
 import { salvarLogin } from "../../services/auth";
 import { refreshSession } from "../../../components/context/AuthContext";
 import { buildRegisterHref, DISCOVER_ROUTE, sanitizeRedirect } from "../../../constants/auth-routes";
+import BrandMark from "../../../components/BrandMark";
 
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
 import { useAccessibility } from '../../../components/accessibility/AccessibilityContext';
@@ -33,7 +34,9 @@ const INVALID_RESET_LINK = "Este link é inválido, expirou ou já foi usado. So
 export default function LoginScreen() {
   const { theme } = useTheme();
   const { highContrast } = useAccessibility();
-  const styles = getStyles(theme, highContrast);
+  const { width } = useWindowDimensions();
+  const compact = width < 520;
+  const styles = getStyles(theme, highContrast, compact);
 
   // Destino que o visitante queria abrir antes de ser mandado ao login (validado: só rotas internas).
   const params = useLocalSearchParams<{
@@ -322,6 +325,7 @@ export default function LoginScreen() {
           <View style={styles.circleBottomRight} />
 
           <View style={styles.loginCard}>
+            <View style={styles.authBrand}><BrandMark showTagline={false} /></View>
             <TouchableOpacity onPress={closeRecovery} disabled={isSubmittingRecovery} style={styles.backButton}
               accessibilityRole="button">
               <ArrowLeft size={18} color={highContrast ? theme.accent : "#E15743"} />
@@ -415,6 +419,7 @@ export default function LoginScreen() {
           <View style={styles.circleBottomRight} />
 
           <View style={styles.loginCard}>
+            <View style={styles.authBrand}><BrandMark showTagline={false} /></View>
             <TouchableOpacity onPress={closeRecovery} disabled={isSubmittingRecovery} style={styles.backButton}
               accessibilityRole="button">
               <ArrowLeft size={18} color={highContrast ? theme.accent : "#E15743"} />
@@ -497,6 +502,7 @@ export default function LoginScreen() {
         <View style={styles.circleBottomRight} />
 
         <View style={styles.loginCard}>
+          <View style={styles.authBrand}><BrandMark showTagline={false} /></View>
           <Text style={styles.title}>Entrar no Portal da Arte</Text>
           <Text style={styles.subtitle}>
             Acesse sua conta para gerenciar contratações, mensagens e{"\n"}
@@ -559,6 +565,17 @@ export default function LoginScreen() {
             <Text style={styles.loginButtonText}>Entrar</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={styles.exploreButton}
+            activeOpacity={0.8}
+            onPress={() => router.replace(DISCOVER_ROUTE as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Explorar artistas sem entrar"
+          >
+            <Text style={styles.exploreButtonText}>Explorar artistas sem entrar</Text>
+          </TouchableOpacity>
+          <Text style={styles.exploreHint}>Você pode descobrir artistas e montar seu carrinho sem login.</Text>
+
           <View style={styles.registerContainer}>
             <Text style={styles.registerText}>Não tem conta?</Text>
             <TouchableOpacity
@@ -575,189 +592,63 @@ export default function LoginScreen() {
   );
 }
 
-const getStyles = (theme: any, highContrast: boolean) => StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: highContrast ? theme.mainBg : "#FFF1E6" },
+const getStyles = (theme: any, highContrast: boolean, compact: boolean) => StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: theme.mainBg },
   container: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: highContrast ? theme.mainBg : "#FFF1E6",
-    padding: 20,
+    backgroundColor: theme.mainBg,
+    padding: compact ? 14 : 20,
+    overflow: "hidden",
   },
   circleTopLeft: {
-    position: "absolute",
-    width: 320,
-    height: 320,
-    borderRadius: 160,
-    backgroundColor: highContrast ? "transparent" : "#FFE9D2",
-    top: -100,
-    left: -80,
+    position: "absolute", width: 320, height: 320, borderRadius: 160,
+    backgroundColor: highContrast ? "transparent" : (theme.accentSoft || theme.surfaceMuted),
+    top: -110, left: -90, opacity: highContrast ? 0 : 0.9,
   },
   circleTopRight: {
-    position: "absolute",
-    width: 380,
-    height: 380,
-    borderRadius: 190,
-    backgroundColor: highContrast ? "transparent" : "#F9DDD0",
-    top: -40,
-    right: -60,
+    position: "absolute", width: 380, height: 380, borderRadius: 190,
+    backgroundColor: highContrast ? "transparent" : (theme.surfaceMuted || theme.accentSoft),
+    top: -70, right: -100, opacity: highContrast ? 0 : 0.78,
   },
   circleBottomRight: {
-    position: "absolute",
-    width: 320,
-    height: 320,
-    borderRadius: 160,
-    backgroundColor: highContrast ? "transparent" : "#F9DDD0",
-    bottom: -100,
-    right: -80,
+    position: "absolute", width: 320, height: 320, borderRadius: 160,
+    backgroundColor: highContrast ? "transparent" : (theme.accentSoft || theme.surfaceMuted),
+    bottom: -120, right: -90, opacity: highContrast ? 0 : 0.72,
   },
   loginCard: {
-    width: "100%",
-    maxWidth: 440,
-    backgroundColor: highContrast ? theme.cardBg : "#FFFFFF",
-    borderWidth: highContrast ? 2 : 0,
-    borderColor: highContrast ? theme.borderColor : "transparent",
-    borderRadius: 24,
-    paddingTop: 40,
-    paddingBottom: 36,
-    paddingHorizontal: 36,
-    shadowColor: highContrast ? "#000000" : "#6D4D3E",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: highContrast ? 0 : 0.1,
-    shadowRadius: 25,
-    elevation: 8,
-    zIndex: 10,
+    width: "100%", maxWidth: 440, backgroundColor: theme.cardBg,
+    borderWidth: highContrast ? 2 : 1, borderColor: theme.borderColor,
+    borderRadius: 30, borderTopWidth: 4, borderTopColor: theme.accent, paddingVertical: compact ? 28 : 36, paddingHorizontal: compact ? 22 : 36,
+    shadowColor: theme.shadowColor || "#000", shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: highContrast ? 0 : 0.12, shadowRadius: 25, elevation: highContrast ? 0 : 8, zIndex: 10,
   },
-  title: {
-    color: highContrast ? theme.textPrimary : "#3D261D",
-    fontSize: 28,
-    fontWeight: "900",
-    textAlign: "center",
-    fontFamily: "serif",
-    marginBottom: 10,
-  },
-  subtitle: {
-    color: highContrast ? theme.textSecondary : "#8C7A70",
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: "center",
-    marginBottom: 28,
-  },
-  label: { color: highContrast ? theme.textPrimary : "#3D261D", fontSize: 13, fontWeight: "700", marginBottom: 8 },
-  input: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
-    borderRadius: 12,
-    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
-    paddingHorizontal: 16,
-    color: highContrast ? theme.textPrimary : "#3D261D",
-    fontSize: 14,
-    marginBottom: 20,
-    ...Platform.select({ web: { outlineStyle: "none" as any } }),
-  },
-  iconInputContainer: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
-    borderRadius: 12,
-    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
+  authBrand: { alignItems: "center", marginBottom: 22 },
+  title: { color: theme.textPrimary, fontSize: compact ? 26 : 30, fontWeight: "900", textAlign: "center", fontFamily: "serif", marginBottom: 10, letterSpacing: -0.5 },
+  subtitle: { color: theme.textSecondary, fontSize: 13, lineHeight: 20, textAlign: "center", marginBottom: 26 },
+  label: { color: theme.textPrimary, fontSize: 13, fontWeight: "700", marginBottom: 8 },
+  input: { height: 50, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 15, backgroundColor: theme.searchBg, paddingHorizontal: 16, color: theme.textPrimary, fontSize: 14, marginBottom: 20, ...Platform.select({ web: { outlineStyle: "none" as any } }) },
+  iconInputContainer: { height: 50, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 15, backgroundColor: theme.searchBg, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, marginBottom: 20 },
   inputIcon: { marginRight: 10 },
-  iconInput: {
-    flex: 1,
-    height: 48,
-    color: highContrast ? theme.textPrimary : "#3D261D",
-    fontSize: 14,
-    paddingVertical: 0,
-    ...Platform.select({ web: { outlineStyle: "none" as any } }),
-  },
-  passwordContainer: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
-    borderRadius: 12,
-    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
+  iconInput: { flex: 1, height: 48, color: theme.textPrimary, fontSize: 14, paddingVertical: 0, ...Platform.select({ web: { outlineStyle: "none" as any } }) },
+  passwordContainer: { height: 50, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 15, backgroundColor: theme.searchBg, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, marginBottom: 20 },
   lockIcon: { marginRight: 10 },
-  passwordInput: {
-    flex: 1,
-    height: 48,
-    color: highContrast ? theme.textPrimary : "#3D261D",
-    fontSize: 14,
-    paddingVertical: 0,
-    paddingHorizontal: 0,
-    ...Platform.select({ web: { outlineStyle: "none" as any } }),
-  },
-  errorText: {
-    color: highContrast ? "#B00020" : "#C53B2C",
-    fontSize: 12,
-    marginTop: -4,
-    marginBottom: 12,
-  },
-  successText: {
-    color: highContrast ? "#006B2E" : "#3E8E5B",
-    fontSize: 13,
-    marginBottom: 16,
-    lineHeight: 18,
-    textAlign: "center",
-  },
-  forgotButton: { alignSelf: "flex-end", marginTop: 0, marginBottom: 24 },
-  forgotText: { color: highContrast ? theme.accent : "#E15743", fontSize: 13, fontWeight: "600" },
-  loginButton: {
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: highContrast ? theme.accent : "#E15743",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 20,
-    shadowColor: highContrast ? theme.accent : "#E15743",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  loginButtonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
-  secondaryButton: {
-    height: 52,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: highContrast ? theme.accent : "#E15743",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  secondaryButtonText: { color: highContrast ? theme.accent : "#E15743", fontSize: 16, fontWeight: "700" },
-  backButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 18,
-    alignSelf: "flex-start",
-  },
-  backText: {
-    color: highContrast ? theme.accent : "#E15743",
-    fontSize: 13,
-    fontWeight: "700",
-    marginLeft: 6,
-  },
-  registerContainer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  registerText: { color: highContrast ? theme.textSecondary : "#8C7A70", fontSize: 13 },
-  registerLink: {
-    color: highContrast ? theme.accent : "#E15743",
-    fontSize: 13,
-    fontWeight: "700",
-    marginLeft: 6,
-  },
+  passwordInput: { flex: 1, height: 48, color: theme.textPrimary, fontSize: 14, paddingVertical: 0, paddingHorizontal: 0, ...Platform.select({ web: { outlineStyle: "none" as any } }) },
+  errorText: { color: theme.danger || "#B42318", fontSize: 12, marginTop: -4, marginBottom: 12 },
+  successText: { color: theme.success || "#16794B", fontSize: 13, marginBottom: 16, lineHeight: 19, textAlign: "center" },
+  forgotButton: { alignSelf: "flex-end", marginTop: 0, marginBottom: 24, minHeight: 32, justifyContent: "center" },
+  forgotText: { color: theme.accent, fontSize: 13, fontWeight: "700" },
+  loginButton: { height: 54, borderRadius: 16, backgroundColor: theme.accent, justifyContent: "center", alignItems: "center", marginBottom: 20, shadowColor: theme.shadowColor || theme.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: highContrast ? 0 : 0.18, shadowRadius: 8, elevation: highContrast ? 0 : 4 },
+  loginButtonText: { color: theme.onAccent || "#FFFFFF", fontSize: 16, fontWeight: "800" },
+  exploreButton: { minHeight: 48, borderRadius: 16, borderWidth: 1.5, borderColor: theme.borderColor, backgroundColor: theme.cardBg, justifyContent: "center", alignItems: "center", marginBottom: 8 },
+  exploreButtonText: { color: theme.textPrimary, fontSize: 14, fontWeight: "800" },
+  exploreHint: { color: theme.textSecondary, fontSize: 10.5, lineHeight: 15, textAlign: "center", marginBottom: 18 },
+  secondaryButton: { height: 52, borderRadius: 16, borderWidth: 1.5, borderColor: theme.accent, justifyContent: "center", alignItems: "center", marginBottom: 4 },
+  secondaryButtonText: { color: theme.accent, fontSize: 16, fontWeight: "700" },
+  backButton: { flexDirection: "row", alignItems: "center", marginBottom: 18, alignSelf: "flex-start", minHeight: 36 },
+  backText: { color: theme.accent, fontSize: 13, fontWeight: "700", marginLeft: 6 },
+  registerContainer: { flexDirection: "row", justifyContent: "center", alignItems: "center", flexWrap: "wrap" },
+  registerText: { color: theme.textSecondary, fontSize: 13 },
+  registerLink: { color: theme.accent, fontSize: 13, fontWeight: "700", marginLeft: 6 },
 });

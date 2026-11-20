@@ -4,6 +4,7 @@ import {
   StyleSheet,
   View,
   Pressable,
+  useWindowDimensions,
 } from 'react-native';
 import { Music, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
@@ -32,15 +33,15 @@ type Props = {
 function getStatusColor(status: string) {
   switch (status) {
     case 'Pendente':
-      return '#F2994A';
+      return '#A15C00';
     case 'Confirmado':
-      return '#56CCF2';
+      return '#176B87';
     case 'Concluido':
-      return '#27AE60';
+      return '#16794B';
     case 'Recusada':
-      return '#C0392B';
+      return '#B42318';
     case 'Expirada':
-      return '#6B7280';
+      return '#5D6470';
     default:
       return '#BDBDBD';
   }
@@ -48,6 +49,8 @@ function getStatusColor(status: string) {
 
 export default function CardContratacao({ item, onPress }: Props) {
   const { theme, isLightMode } = useTheme();
+  const { width } = useWindowDimensions();
+  const compact = width < 620;
   const IconComponent = item.icon;
 
   const avatarBg = isLightMode
@@ -57,16 +60,18 @@ export default function CardContratacao({ item, onPress }: Props) {
   const styles = StyleSheet.create({
     card: {
       backgroundColor: theme.cardBg,
-      borderRadius: 12,
-      paddingVertical: 16,
-      paddingHorizontal: 20,
-      flexDirection: 'row',
-      alignItems: 'center',
+      borderRadius: 20,
+      paddingVertical: compact ? 16 : 18,
+      paddingHorizontal: compact ? 16 : 20,
+      borderLeftWidth: 4,
+      borderLeftColor: theme.accent,
+      flexDirection: compact ? 'column' : 'row',
+      alignItems: compact ? 'stretch' : 'center',
       justifyContent: 'space-between',
-      shadowColor: '#000',
+      shadowColor: theme.shadowColor || '#000',
       shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
+      shadowOpacity: 0.10,
+      shadowRadius: 10,
       elevation: 3,
       borderWidth: 1,
       borderColor: theme.borderColor,
@@ -78,9 +83,9 @@ export default function CardContratacao({ item, onPress }: Props) {
       minWidth: 0,
     },
     avatarContainer: {
-      width: 52,
-      height: 52,
-      borderRadius: 26,
+      width: 58,
+      height: 58,
+      borderRadius: 17,
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: 16,
@@ -97,15 +102,17 @@ export default function CardContratacao({ item, onPress }: Props) {
       flexWrap: 'wrap',
     },
     artistName: {
-      fontSize: 16,
-      fontWeight: '700',
+      fontSize: 18,
+      fontWeight: '900',
+      fontFamily: 'serif',
       color: theme.textPrimary,
       marginRight: 8,
     },
     artistCategory: {
-      fontSize: 12,
-      color: theme.textSecondary,
-      fontWeight: '500',
+      fontSize: 10,
+      color: theme.accent,
+      fontWeight: '800',
+      letterSpacing: 0.5,
     },
     infoText: {
       fontSize: 12,
@@ -114,20 +121,31 @@ export default function CardContratacao({ item, onPress }: Props) {
     },
     cardRightGroup: {
       alignItems: 'flex-end',
-      justifyContent: 'center',
-      marginLeft: 12,
+      marginLeft: compact ? 0 : 12,
+      marginTop: compact ? 14 : 0,
+      paddingTop: compact ? 12 : 0,
+      borderTopWidth: compact ? 1 : 0,
+      borderTopColor: theme.borderColor,
+      flexDirection: compact ? 'row' : 'column',
+      width: compact ? '100%' : undefined,
+      justifyContent: compact ? 'space-between' : 'center',
       gap: 10,
     },
     statusBadge: {
-      paddingVertical: 6,
-      paddingHorizontal: 12,
-      borderRadius: 20,
+      paddingVertical: 7,
+      paddingHorizontal: 11,
+      borderRadius: 10,
       backgroundColor: getStatusColor(item.status),
     },
     statusText: {
       color: '#FFFFFF',
-      fontSize: 12,
-      fontWeight: '700',
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 0.4,
+    },
+    chevronButton: {
+      width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: theme.surfaceMuted || theme.mainBg, borderWidth: 1, borderColor: theme.borderColor,
     },
   });
 
@@ -179,10 +197,9 @@ export default function CardContratacao({ item, onPress }: Props) {
           </Text>
         </View>
 
-        <ChevronRight
-          size={20}
-          color={theme.textSecondary}
-        />
+        <View style={styles.chevronButton} accessible={false}>
+          <ChevronRight size={18} color={theme.textPrimary} accessible={false} />
+        </View>
       </View>
     </Pressable>
   );

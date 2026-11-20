@@ -1,0 +1,45 @@
+PORTAL DA ARTE - ALTERACOES DESTA ENTREGA
+Data: 20/11/2026
+
+DESIGN / EXPLORAR
+- Reducao da sensacao de dashboard generico.
+- Cards de artistas reorganizados para priorizar portifolio e servicos.
+- Correcao do problema de cards cortados.
+- Grid responsivo em 1/2/3 colunas com larguras seguras.
+- Filtro lateral restrito a telas grandes; modal nas demais.
+- Melhor hierarquia de nome, avaliacao, servicos, preco e acoes.
+
+CARRINHO
+- Novo CartContext persistido com AsyncStorage.
+- Nova rota publica /pages/carrinho/carrinho.
+- Carrinho na navegacao global e no Header.
+- Adicao sem login.
+- Remocao, desfazer remocao e limpar carrinho.
+- Total e quantidade sempre visiveis.
+- Login somente no checkout.
+- Retomada automatica do checkout apos login.
+
+SERVICOS
+- Compra direta somente para servicos de preco fixo.
+- Servicos de preco variavel permanecem no fluxo de orcamento.
+- Atalhos para adicionar ao carrinho em Descobrir e Perfil Publico.
+
+PAGAMENTO
+- POST /api/carrinho/checkout autenticado.
+- Revalidacao server-side dos servicos e precos.
+- Asaas Checkout com PIX + CREDIT_CARD e charge DETACHED.
+- Um checkout contem todos os itens do carrinho.
+- Webhook autenticado por asaas-access-token.
+- Idempotencia pelo id do evento.
+- CHECKOUT_PAID cria propostas/contratos correspondentes aos itens.
+- CHECKOUT_CANCELED e CHECKOUT_EXPIRED atualizam o pedido sem apagar o carrinho local.
+
+BANCO
+- pedidos_carrinho
+- pedido_carrinho_itens
+- eventos_asaas_checkout
+- migracao: BancoDeDados/migracao_carrinho_checkout_asaas.sql
+
+LOGIN
+- Botao "Explorar artistas sem entrar".
+- Carrinho mantido durante login/cadastro.

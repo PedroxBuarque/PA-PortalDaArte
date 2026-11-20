@@ -1,0 +1,111 @@
+PORTAL DA ARTE - VERSAO FINAL: DESIGN + EXPLORAR + CARRINHO
+Data: 20/11/2026
+
+Esta versao consolida o redesign, a correcao da tela Explorar, o carrinho publico e o checkout unico via Asaas.
+
+1. CREDENCIAIS
+O ZIP final NAO contem arquivos .env reais.
+Copie do seu ambiente atual:
+- python-api/.env
+- PA-PortalDaArte/.env
+
+No frontend, EXPO_PUBLIC_API_URL deve apontar para a API. Em celular fisico, use o IP da maquina na rede local, nao 127.0.0.1.
+
+2. FRONTEND
+Na pasta PA-PortalDaArte:
+
+npm install
+npx expo start -c
+
+3. BACKEND
+Na raiz do repositorio:
+
+py -m pip install -r requirements.txt
+cd python-api
+py -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+4. MYSQL - CARRINHO
+Aplique uma vez no banco existente:
+
+BancoDeDados/migracao_carrinho_checkout_asaas.sql
+
+O backend tambem executa CREATE TABLE IF NOT EXISTS por seguranca, mas a migracao SQL continua sendo a forma recomendada de preparar o ambiente.
+
+5. ASAAS CHECKOUT
+No python-api/.env, configure:
+
+ASAAS_ENV=sandbox
+ASAAS_API_KEY=...
+ASAAS_USER_AGENT=PortalDaArte/1.0
+ASAAS_WEBHOOK_TOKEN=token_aleatorio_com_32_ou_mais_caracteres
+ASAAS_WEBHOOK_PUBLIC_URL=https://SEU_BACKEND_PUBLICO/api/webhooks/asaas/checkout
+ASAAS_CHECKOUT_SUCCESS_URL=http://localhost:8081/pages/carrinho/carrinho
+ASAAS_CHECKOUT_CANCEL_URL=http://localhost:8081/pages/carrinho/carrinho
+ASAAS_CHECKOUT_EXPIRED_URL=http://localhost:8081/pages/carrinho/carrinho
+
+Para cadastrar o webhook automaticamente:
+
+cd python-api
+py configurar_webhook_asaas.py
+
+Para desenvolvimento local, o Webhook precisa de uma URL HTTPS publica para chegar ate sua API local (por exemplo, um tunnel HTTPS de desenvolvimento).
+
+6. COMO O CARRINHO FUNCIONA
+- Visitante pode abrir Descobrir, perfil do artista e Carrinho sem login.
+- Servicos de PRECO FIXO podem ser adicionados ao carrinho.
+- Servicos com faixa de preco continuam no fluxo de orcamento/contratacao, evitando cobrar um valor incorreto.
+- O carrinho e salvo localmente no dispositivo/navegador.
+- O login so e exigido ao clicar em "Entrar para pagar" / "Pagar tudo de uma vez".
+- Depois do login, o checkout e retomado automaticamente.
+- O backend recalcula precos diretamente no MySQL antes de criar o Checkout.
+- O Checkout Asaas permite PIX e cartao de credito em uma unica compra.
+- O retorno do navegador NAO confirma pagamento. Somente o Webhook CHECKOUT_PAID materializa propostas/contratos.
+- Cancelamento ou expiracao nao apagam o carrinho local.
+
+7. LOGIN -> EXPLORAR
+A tela de login agora possui o botao "Explorar artistas sem entrar", que sempre leva para Descobrir sem exigir autenticacao.
+
+8. EXPLORAR - CORRECAO DE CARDS CORTADOS
+- Grid adaptativo: 1, 2 ou 3 colunas conforme a largura disponivel.
+- Filtro lateral so aparece em telas grandes.
+- Cards possuem largura segura e nao encolhem ate cortar conteudo.
+- Em telas menores, os filtros abrem em modal.
+- O card mostra imagem, artista, servicos, avaliacao, preco e acoes sem cortar o rodape.
+
+9. TESTE RAPIDO
+SEM LOGIN:
+- Abrir Descobrir.
+- Abrir perfil publico.
+- Adicionar 2 ou mais servicos fixos ao carrinho.
+- Fechar/reabrir a pagina e confirmar persistencia.
+- Abrir Login e usar "Explorar artistas sem entrar".
+- No Carrinho, confirmar que o botao pede login apenas no pagamento.
+
+COM LOGIN:
+- Adicionar servicos de artistas diferentes.
+- Abrir Carrinho e conferir o total.
+- Iniciar Checkout.
+- Concluir no Sandbox Asaas.
+- Confirmar recebimento de CHECKOUT_PAID no backend.
+- Confirmar contratos gerados para os itens pagos.
+
+RESPONSIVIDADE:
+- 390 px
+- 768 px
+- 1024 px
+- 1366/1440 px
+- 1920 px
+
+Consulte tambem:
+- VALIDACAO-VERSAO-FINAL.txt
+- HEURISTICAS-NIELSEN-E-CARRINHO.txt
+- ALTERACOES-CARRINHO-EXPLORAR.txt
+
+CREDENCIAIS E PAGAMENTOS CONSOLIDADOS
+-------------------------------------
+Esta edição inclui os .env privados que vieram do projeto enviado anteriormente e o módulo PortalDaArte-Somente-Pagamentos.zip.
+IMPORTANTE: o ZIP de pagamentos enviado não continha uma ASAAS_API_KEY preenchida. Portanto, essa variável continua vazia no python-api/.env.
+Antes de testar o pagamento, execute VERIFICAR-CREDENCIAIS.bat. O script mostra apenas os NOMES das configurações faltantes e nunca imprime segredos.
+
+O módulo financeiro Sandbox adicional usa BancoDeDados/pagamentos_sandbox.sql.
+O carrinho/checkout usa BancoDeDados/migracao_carrinho_checkout_asaas.sql.

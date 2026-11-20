@@ -4,7 +4,9 @@ import traceback
 import hashlib
 import hmac
 import html
+import json
 import logging
+from decimal import Decimal, InvalidOperation
 import re
 import secrets
 import smtplib
@@ -19,6 +21,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import jwt
 import mysql.connector
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, status, Depends, BackgroundTasks, Request, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,7 +32,7 @@ from portfolio_storage import (
     criar_caminho, ler_referencia, referencia_storage, validar_arquivo_portfolio,
 )
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Literal
 import bcrypt
 
 # Configuração ao lado da API; aceita BOM do Windows e preserva variáveis já exportadas.
@@ -169,12 +172,19 @@ class DetalhesArtistaUpdate(BaseModel):
     modalidade_atendimento: str = "ambos"
 
 class PropostaCreate(BaseModel):
-    conversa_id: int
-    servico_id: Optional[int] = None
-    descricao_escopo: str
-    local_ou_modalidade: Optional[str] = None
-    prazo_estimado: Optional[str] = None
-    valor_proposto: float
+    conversa_id: int = Field(..., gt=0)
+    servico_id: Optional[int] = Field(None, gt=0)
+    descricao_escopo: str = Field(..., min_length=10, max_length=5000)
+    local_ou_modalidade: Optional[str] = Field(None, max_length=255)
+    prazo_estimado: Optional[str] = Field(None, max_length=10)
+    valor_proposto: float = Field(..., gt=0, le=100000000)
+
+class PropostaResposta(BaseModel):
+    acao: Literal["aceitar", "recusar"]
+
+
+class CarrinhoCheckoutCreate(BaseModel):
+    servico_ids: List[int] = Field(..., min_length=1, max_length=20)
 
 
 class ConversaCreate(BaseModel):
@@ -1038,6 +1048,55 @@ def atualizar_perfil_logado(perfil: PerfilUpdate, current_user: dict = Depends(g
 # MENSAGENS E CONVERSAS REAIS
 # ============================================================
 
+MEDIA_MESSAGE_PREFIX = "__PA_MEDIA_V1__:"
+
+
+def _decodificar_mensagem_midia(conteudo: str):
+    if not isinstance(conteudo, str) or not conteudo.startswith(MEDIA_MESSAGE_PREFIX):
+        return None
+    try:
+        data = json.loads(conteudo[len(MEDIA_MESSAGE_PREFIX):])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    tipo = data.get("type")
+    referencia = data.get("ref")
+    legenda = data.get("caption") or ""
+    if tipo not in ("image", "video") or not isinstance(referencia, str) or not referencia.startswith("supabase://"):
+        return None
+    if not isinstance(legenda, str):
+        legenda = ""
+    return {"type": tipo, "ref": referencia, "caption": legenda[:500]}
+
+
+def _serializar_mensagem(row: dict, usuario_id: int):
+    resultado = dict(row)
+    resultado["id"] = str(resultado["id"])
+    resultado["fromMe"] = int(resultado["remetente_id"]) == int(usuario_id)
+    midia = _decodificar_mensagem_midia(resultado.get("conteudo") or "")
+    if midia:
+        resultado["text"] = midia["caption"]
+        resultado["media_type"] = midia["type"]
+        resultado["media_url"] = None
+        try:
+            referencia = ler_referencia(midia["ref"], int(resultado["remetente_id"]))
+            if referencia:
+                bucket, caminho = referencia
+                storage = SupabasePortfolioStorage()
+                if bucket == storage.config.bucket:
+                    resultado["media_url"] = storage.signed_url(caminho)
+        except PortfolioStorageError:
+            # O texto da conversa continua disponível mesmo se o Storage estiver temporariamente fora.
+            resultado["media_url"] = None
+    else:
+        resultado["text"] = resultado.get("conteudo") or ""
+        resultado["media_type"] = None
+        resultado["media_url"] = None
+    resultado["time"] = resultado["criado_em"].strftime("%H:%M") if resultado.get("criado_em") else ""
+    resultado["criado_em"] = resultado["criado_em"].isoformat() if resultado.get("criado_em") else None
+    return resultado
+
 @app.get("/api/conversas", tags=["Mensagens"])
 def listar_conversas(current_user: dict = Depends(get_usuario_atual)):
     conexao = None
@@ -1088,6 +1147,10 @@ def listar_conversas(current_user: dict = Depends(get_usuario_atual)):
         for row in rows:
             if row.get("ultima_mensagem_em"):
                 row["ultima_mensagem_em"] = row["ultima_mensagem_em"].isoformat()
+            midia = _decodificar_mensagem_midia(row.get("ultima_mensagem") or "")
+            if midia:
+                tipo = "Vídeo" if midia["type"] == "video" else "Imagem"
+                row["ultima_mensagem"] = midia["caption"] or f"📎 {tipo}"
             row["nao_lidas"] = int(row.get("nao_lidas") or 0)
         return {"conversas": rows}
     except Exception:
@@ -1113,10 +1176,9 @@ def criar_ou_obter_conversa(dados: ConversaCreate, current_user: dict = Depends(
             raise HTTPException(status_code=404, detail="Perfil de artista não encontrado.")
         cursor.execute("""
             SELECT id FROM conversas
-            WHERE (contratante_id = %s AND artista_id = %s)
-               OR (contratante_id = %s AND artista_id = %s)
+            WHERE contratante_id = %s AND artista_id = %s
             ORDER BY id DESC LIMIT 1
-        """, (usuario_id, dados.artista_id, dados.artista_id, usuario_id))
+        """, (usuario_id, dados.artista_id))
         row = cursor.fetchone()
         if row:
             conversa_id = int(row["id"])
@@ -1165,13 +1227,7 @@ def listar_mensagens(conversa_id: int, current_user: dict = Depends(get_usuario_
             ORDER BY criado_em ASC, id ASC
         """, (conversa_id,))
         rows = cursor.fetchall()
-        for row in rows:
-            row["id"] = str(row["id"])
-            row["fromMe"] = int(row["remetente_id"]) == usuario_id
-            row["text"] = row["conteudo"]
-            row["time"] = row["criado_em"].strftime("%H:%M") if row.get("criado_em") else ""
-            row["criado_em"] = row["criado_em"].isoformat() if row.get("criado_em") else None
-        return {"mensagens": rows}
+        return {"mensagens": [_serializar_mensagem(row, usuario_id) for row in rows]}
     except HTTPException:
         raise
     except Exception:
@@ -1204,19 +1260,13 @@ def enviar_mensagem(conversa_id: int, dados: MensagemCreate, current_user: dict 
             INSERT INTO mensagens (conversa_id, remetente_id, conteudo)
             VALUES (%s, %s, %s)
         """, (conversa_id, usuario_id, conteudo))
-        conexao.commit()
         message_id = cursor.lastrowid
+        conexao.commit()
         cursor.execute("""
             SELECT id, conversa_id, remetente_id, conteudo, criado_em, lida
             FROM mensagens WHERE id = %s
         """, (message_id,))
-        row = cursor.fetchone()
-        row["id"] = str(row["id"])
-        row["fromMe"] = True
-        row["text"] = row["conteudo"]
-        row["time"] = row["criado_em"].strftime("%H:%M") if row.get("criado_em") else ""
-        row["criado_em"] = row["criado_em"].isoformat() if row.get("criado_em") else None
-        return {"status": "sucesso", "mensagem": row}
+        return {"status": "sucesso", "mensagem": _serializar_mensagem(cursor.fetchone(), usuario_id)}
     except HTTPException:
         if conexao: conexao.rollback()
         raise
@@ -1224,6 +1274,166 @@ def enviar_mensagem(conversa_id: int, dados: MensagemCreate, current_user: dict 
         if conexao: conexao.rollback()
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Não foi possível enviar a mensagem.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.post("/api/conversas/{conversa_id}/mensagens/arquivo", tags=["Mensagens"])
+def enviar_midia_mensagem(
+    conversa_id: int,
+    arquivo: UploadFile = File(...),
+    conteudo: str = Form("", max_length=500),
+    current_user: dict = Depends(get_usuario_atual),
+):
+    """Envia imagem/vídeo de mensagem ao mesmo Storage privado já usado pelo portfólio."""
+    conexao = None
+    cursor = None
+    storage = None
+    caminho = None
+    commit_ok = False
+    try:
+        usuario_id = int(current_user["id"])
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT id FROM conversas
+            WHERE id = %s AND (contratante_id = %s OR artista_id = %s)
+        """, (conversa_id, usuario_id, usuario_id))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+
+        storage = SupabasePortfolioStorage()
+        metadata = validar_arquivo_portfolio(arquivo, storage.config.max_bytes)
+        if metadata.tipo not in ("imagem", "video"):
+            raise HTTPException(status_code=415, detail="Mensagens aceitam imagens ou vídeos.")
+        storage.verificar_bucket_privado()
+        caminho = criar_caminho(usuario_id, metadata.extensao)
+        storage.upload(caminho, arquivo, metadata)
+        marcador = MEDIA_MESSAGE_PREFIX + json.dumps({
+            "type": "video" if metadata.tipo == "video" else "image",
+            "ref": referencia_storage(storage.config.bucket, caminho),
+            "caption": conteudo.strip()[:500],
+            "name": metadata.nome,
+        }, ensure_ascii=False, separators=(",", ":"))
+        cursor.execute("""
+            INSERT INTO mensagens (conversa_id, remetente_id, conteudo)
+            VALUES (%s, %s, %s)
+        """, (conversa_id, usuario_id, marcador))
+        message_id = cursor.lastrowid
+        conexao.commit()
+        commit_ok = True
+        cursor.execute("""
+            SELECT id, conversa_id, remetente_id, conteudo, criado_em, lida
+            FROM mensagens WHERE id = %s
+        """, (message_id,))
+        return {"status": "sucesso", "mensagem": _serializar_mensagem(cursor.fetchone(), usuario_id)}
+    except HTTPException:
+        if conexao: conexao.rollback()
+        if caminho and storage and not commit_ok:
+            try: storage.delete([caminho])
+            except PortfolioStorageError: pass
+        raise
+    except PortfolioStorageError as error:
+        if conexao: conexao.rollback()
+        if caminho and storage and not commit_ok:
+            try: storage.delete([caminho])
+            except PortfolioStorageError: pass
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from None
+    except Exception:
+        if conexao: conexao.rollback()
+        if caminho and storage and not commit_ok:
+            try: storage.delete([caminho])
+            except PortfolioStorageError: pass
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível enviar a mídia.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+        try: arquivo.file.close()
+        except Exception: pass
+
+
+@app.get("/api/conversas/{conversa_id}/mensagens/{mensagem_id}/arquivo", tags=["Mensagens"])
+def abrir_midia_mensagem(conversa_id: int, mensagem_id: int, current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        usuario_id = int(current_user["id"])
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT m.remetente_id, m.conteudo
+            FROM mensagens m
+            INNER JOIN conversas c ON c.id = m.conversa_id
+            WHERE m.id = %s AND m.conversa_id = %s
+              AND (c.contratante_id = %s OR c.artista_id = %s)
+        """, (mensagem_id, conversa_id, usuario_id, usuario_id))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+        midia = _decodificar_mensagem_midia(row["conteudo"])
+        if not midia:
+            raise HTTPException(status_code=404, detail="Esta mensagem não possui mídia.")
+        referencia = ler_referencia(midia["ref"], int(row["remetente_id"]))
+        if not referencia:
+            raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+        bucket, caminho = referencia
+        storage = SupabasePortfolioStorage()
+        if bucket != storage.config.bucket:
+            raise HTTPException(status_code=503, detail="O bucket configurado não corresponde à mídia.")
+        url = storage.signed_url(caminho)
+        return RedirectResponse(url, status_code=307, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+    except PortfolioStorageError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from None
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.delete("/api/conversas/{conversa_id}/mensagens/{mensagem_id}", tags=["Mensagens"])
+def excluir_mensagem(conversa_id: int, mensagem_id: int, current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        usuario_id = int(current_user["id"])
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT m.remetente_id, m.conteudo
+            FROM mensagens m
+            INNER JOIN conversas c ON c.id = m.conversa_id
+            WHERE m.id = %s AND m.conversa_id = %s
+              AND (c.contratante_id = %s OR c.artista_id = %s)
+            FOR UPDATE
+        """, (mensagem_id, conversa_id, usuario_id, usuario_id))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Mensagem não encontrada.")
+        if int(row["remetente_id"]) != usuario_id:
+            raise HTTPException(status_code=403, detail="Você só pode excluir as suas próprias mensagens.")
+        midia = _decodificar_mensagem_midia(row["conteudo"])
+        if midia:
+            referencia = ler_referencia(midia["ref"], usuario_id)
+            if referencia:
+                bucket, caminho = referencia
+                storage = SupabasePortfolioStorage()
+                if bucket != storage.config.bucket:
+                    raise HTTPException(status_code=503, detail="O bucket configurado não corresponde à mídia.")
+                storage.delete([caminho])
+        cursor.execute("DELETE FROM mensagens WHERE id = %s AND conversa_id = %s", (mensagem_id, conversa_id))
+        conexao.commit()
+        return {"status": "sucesso"}
+    except HTTPException:
+        if conexao: conexao.rollback()
+        raise
+    except PortfolioStorageError as error:
+        if conexao: conexao.rollback()
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from None
+    except Exception:
+        if conexao: conexao.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível excluir a mensagem.")
     finally:
         if cursor: cursor.close()
         if conexao: conexao.close()
@@ -1909,32 +2119,651 @@ def excluir_item_portfolio(portfolio_id: int, current_user: dict = Depends(get_u
         if conexao: conexao.close()
 
 
+def _normalizar_proposta(row: dict, usuario_id: int):
+    result = dict(row)
+    for field in ("valor_proposto",):
+        if result.get(field) is not None:
+            result[field] = float(result[field])
+    for field in ("prazo_estimado", "criado_em", "atualizado_em"):
+        value = result.get(field)
+        if value is not None and hasattr(value, "isoformat"):
+            result[field] = value.isoformat()
+    result["papel_atual"] = "contratante" if int(result["contratante_id"]) == int(usuario_id) else "artista"
+    return result
+
+
 @app.post("/api/propostas", tags=["Marketplace"])
 def enviar_proposta(proposta: PropostaCreate, current_user: dict = Depends(get_usuario_atual)):
     conexao = None
     cursor = None
     try:
-        conexao = get_db_connection()
-        cursor = conexao.cursor()
+        usuario_id = int(current_user["id"])
+        prazo = None
+        if proposta.prazo_estimado:
+            try:
+                prazo = datetime.strptime(proposta.prazo_estimado, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Prazo inválido. Use o formato AAAA-MM-DD.")
 
-        query = """
-            INSERT INTO propostas (conversa_id, servico_id, descricao_escopo, local_ou_modalidade, prazo_estimado, valor_proposto)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """
-        cursor.execute(query, (
-            proposta.conversa_id, proposta.servico_id, proposta.descricao_escopo,
-            proposta.local_ou_modalidade, proposta.prazo_estimado, proposta.valor_proposto
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("SELECT contratante_id, artista_id, servico_id FROM conversas WHERE id = %s FOR UPDATE", (proposta.conversa_id,))
+        conversa = cursor.fetchone()
+        if not conversa:
+            raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+        if int(conversa["contratante_id"]) != usuario_id:
+            raise HTTPException(status_code=403, detail="Somente o contratante desta conversa pode enviar uma proposta.")
+
+        servico_id = proposta.servico_id or conversa.get("servico_id")
+        if servico_id is not None:
+            cursor.execute("SELECT id FROM servicos WHERE id = %s AND artista_id = %s AND ativo = TRUE", (servico_id, conversa["artista_id"]))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=400, detail="O serviço informado não pertence ao artista desta conversa.")
+
+        cursor.execute("""
+            INSERT INTO propostas
+                (conversa_id, contratante_id, artista_id, servico_id, descricao_escopo,
+                 local_ou_modalidade, prazo_estimado, valor_proposto, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'em_negociacao')
+        """, (
+            proposta.conversa_id, conversa["contratante_id"], conversa["artista_id"], servico_id,
+            proposta.descricao_escopo.strip(), (proposta.local_ou_modalidade or "").strip() or None,
+            prazo, proposta.valor_proposto,
         ))
+        proposta_id = int(cursor.lastrowid)
+        resumo = f"Solicitação de contratação #{proposta_id} enviada — valor {proposta.valor_proposto:.2f}."
+        cursor.execute("INSERT INTO mensagens (conversa_id, remetente_id, conteudo) VALUES (%s, %s, %s)",
+                       (proposta.conversa_id, usuario_id, resumo))
         conexao.commit()
-        return {"status": "sucesso", "mensagem": "Proposta enviada com sucesso"}
-    except Exception as err:
+        return {
+            "status": "sucesso",
+            "mensagem": "Proposta enviada com sucesso",
+            "proposta_id": proposta_id,
+            "conversa_id": proposta.conversa_id,
+        }
+    except HTTPException:
         if conexao: conexao.rollback()
-        print("--- ERRO EM /api/propostas (POST) ---")
+        raise
+    except Exception:
+        if conexao: conexao.rollback()
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro detalhado no servidor: {str(err)}"
-        )
+        raise HTTPException(status_code=500, detail="Não foi possível enviar a proposta.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+def _query_propostas_base():
+    return """
+        SELECT
+            p.id, p.conversa_id, p.contratante_id, p.artista_id, p.servico_id,
+            p.descricao_escopo, p.local_ou_modalidade, p.prazo_estimado,
+            p.valor_proposto, p.status, p.criado_em, p.atualizado_em,
+            COALESCE(pa.nome_artistico, perfil_art.nome_completo, ua.email, 'Artista') AS artista_nome,
+            COALESCE(perfil_cli.nome_completo, uc.email, 'Contratante') AS contratante_nome,
+            COALESCE(s.titulo, pa.categoria_atuacao, 'Serviço artístico') AS servico_titulo,
+            pa.categoria_atuacao,
+            ct.id AS contrato_id,
+            ct.status AS contrato_status
+        FROM propostas p
+        INNER JOIN usuarios ua ON ua.id = p.artista_id
+        INNER JOIN usuarios uc ON uc.id = p.contratante_id
+        LEFT JOIN perfis_artista pa ON pa.usuario_id = p.artista_id
+        LEFT JOIN perfis perfil_art ON perfil_art.usuario_id = p.artista_id
+        LEFT JOIN perfis perfil_cli ON perfil_cli.usuario_id = p.contratante_id
+        LEFT JOIN servicos s ON s.id = p.servico_id
+        LEFT JOIN contratos ct ON ct.proposta_id = p.id
+    """
+
+
+@app.get("/api/propostas", tags=["Marketplace"])
+def listar_propostas(current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        usuario_id = int(current_user["id"])
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute(_query_propostas_base() + " WHERE p.contratante_id = %s OR p.artista_id = %s ORDER BY p.criado_em DESC, p.id DESC", (usuario_id, usuario_id))
+        return {"propostas": [_normalizar_proposta(row, usuario_id) for row in cursor.fetchall()]}
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível carregar as contratações.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.get("/api/propostas/{proposta_id}", tags=["Marketplace"])
+def obter_proposta(proposta_id: int, current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        usuario_id = int(current_user["id"])
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute(_query_propostas_base() + " WHERE p.id = %s AND (p.contratante_id = %s OR p.artista_id = %s)",
+                       (proposta_id, usuario_id, usuario_id))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Contratação não encontrada.")
+        return {"proposta": _normalizar_proposta(row, usuario_id)}
+    except HTTPException:
+        raise
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível carregar a contratação.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.post("/api/propostas/{proposta_id}/responder", tags=["Marketplace"])
+def responder_proposta(proposta_id: int, resposta: PropostaResposta, current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        usuario_id = int(current_user["id"])
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM propostas WHERE id = %s FOR UPDATE", (proposta_id,))
+        proposta = cursor.fetchone()
+        if not proposta:
+            raise HTTPException(status_code=404, detail="Proposta não encontrada.")
+        if int(proposta["artista_id"]) != usuario_id:
+            raise HTTPException(status_code=403, detail="Somente o artista pode aceitar ou recusar esta proposta.")
+        if proposta["status"] != "em_negociacao":
+            esperado = "aceita" if resposta.acao == "aceitar" else "recusada"
+            if proposta["status"] == esperado:
+                cursor.execute("SELECT id FROM contratos WHERE proposta_id = %s", (proposta_id,))
+                contrato = cursor.fetchone()
+                return {"status": "sucesso", "proposta_status": proposta["status"], "contrato_id": contrato["id"] if contrato else None}
+            raise HTTPException(status_code=409, detail="Esta proposta já foi respondida.")
+
+        if resposta.acao == "recusar":
+            cursor.execute("UPDATE propostas SET status = 'recusada' WHERE id = %s", (proposta_id,))
+            texto = f"A proposta de contratação #{proposta_id} foi recusada."
+            contrato_id = None
+        else:
+            cursor.execute("UPDATE propostas SET status = 'aceita' WHERE id = %s", (proposta_id,))
+            cursor.execute("SELECT id FROM modelos_contrato WHERE ativo = TRUE ORDER BY id LIMIT 1")
+            modelo = cursor.fetchone()
+            if not modelo:
+                cursor.execute("""
+                    INSERT INTO modelos_contrato (nome, tipo_pagamento, clausulas, versao, ativo)
+                    VALUES ('Contrato padrão Portal da Arte', 'pos_entrega', %s, 1, TRUE)
+                """, ("Prestação do serviço conforme escopo, prazo e valor aceitos na proposta registrada no Portal da Arte.",))
+                modelo_id = int(cursor.lastrowid)
+            else:
+                modelo_id = int(modelo["id"])
+            cursor.execute("SELECT id FROM contratos WHERE proposta_id = %s", (proposta_id,))
+            contrato = cursor.fetchone()
+            if contrato:
+                contrato_id = int(contrato["id"])
+            else:
+                cursor.execute("""
+                    INSERT INTO contratos
+                        (proposta_id, modelo_id, contratante_id, artista_id, valor_total, status,
+                         aceito_contratante_em, aceito_artista_em)
+                    VALUES (%s, %s, %s, %s, %s, 'ativo', %s, NOW())
+                """, (
+                    proposta_id, modelo_id, proposta["contratante_id"], proposta["artista_id"],
+                    proposta["valor_proposto"], proposta["criado_em"],
+                ))
+                contrato_id = int(cursor.lastrowid)
+                cursor.execute("""
+                    INSERT INTO historico_contrato (contrato_id, status_anterior, status_novo, alterado_por, observacao)
+                    VALUES (%s, NULL, 'ativo', %s, 'Contrato criado após aceite da proposta')
+                """, (contrato_id, usuario_id))
+                cursor.execute("UPDATE perfis_artista SET total_contratacoes = total_contratacoes + 1 WHERE usuario_id = %s", (usuario_id,))
+            texto = f"A proposta de contratação #{proposta_id} foi aceita. Contrato #{contrato_id} criado."
+
+        cursor.execute("INSERT INTO mensagens (conversa_id, remetente_id, conteudo) VALUES (%s, %s, %s)",
+                       (proposta["conversa_id"], usuario_id, texto))
+        conexao.commit()
+        return {"status": "sucesso", "proposta_status": "aceita" if resposta.acao == "aceitar" else "recusada", "contrato_id": contrato_id}
+    except HTTPException:
+        if conexao: conexao.rollback()
+        raise
+    except Exception:
+        if conexao: conexao.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível responder à proposta.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+
+# ============================================================
+# CARRINHO + ASAAS CHECKOUT
+# ============================================================
+
+CARRINHO_STATUS_PUBLICOS = {
+    "criando": "Preparando pagamento",
+    "aguardando_pagamento": "Aguardando pagamento",
+    "pago": "Pagamento confirmado",
+    "cancelado": "Pagamento cancelado",
+    "expirado": "Checkout expirado",
+    "erro": "Falha ao preparar pagamento",
+}
+
+
+def _ensure_cart_schema(conexao):
+    """Mantém instalações existentes compatíveis sem exigir recriar o banco."""
+    cursor = conexao.cursor()
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pedidos_carrinho (
+                id BIGINT NOT NULL AUTO_INCREMENT,
+                contratante_id BIGINT NOT NULL,
+                checkout_externo_id VARCHAR(100) DEFAULT NULL,
+                status ENUM('criando','aguardando_pagamento','pago','cancelado','expirado','erro') NOT NULL DEFAULT 'criando',
+                valor_total DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                pago_em DATETIME DEFAULT NULL,
+                PRIMARY KEY (id),
+                UNIQUE KEY uq_pedido_checkout (checkout_externo_id),
+                KEY idx_pedido_contratante (contratante_id),
+                KEY idx_pedido_status (status),
+                CONSTRAINT fk_pedido_contratante FOREIGN KEY (contratante_id) REFERENCES usuarios(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pedido_carrinho_itens (
+                id BIGINT NOT NULL AUTO_INCREMENT,
+                pedido_id BIGINT NOT NULL,
+                servico_id BIGINT NOT NULL,
+                artista_id BIGINT NOT NULL,
+                titulo VARCHAR(150) NOT NULL,
+                descricao TEXT DEFAULT NULL,
+                modalidade VARCHAR(30) DEFAULT NULL,
+                valor_unitario DECIMAL(12,2) NOT NULL,
+                proposta_id BIGINT DEFAULT NULL,
+                contrato_id BIGINT DEFAULT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                UNIQUE KEY uq_pedido_servico (pedido_id, servico_id),
+                KEY idx_item_pedido (pedido_id),
+                KEY idx_item_servico (servico_id),
+                KEY idx_item_artista (artista_id),
+                CONSTRAINT fk_item_pedido FOREIGN KEY (pedido_id) REFERENCES pedidos_carrinho(id) ON DELETE CASCADE,
+                CONSTRAINT fk_item_servico FOREIGN KEY (servico_id) REFERENCES servicos(id),
+                CONSTRAINT fk_item_artista FOREIGN KEY (artista_id) REFERENCES perfis_artista(usuario_id),
+                CONSTRAINT fk_item_proposta FOREIGN KEY (proposta_id) REFERENCES propostas(id) ON DELETE SET NULL,
+                CONSTRAINT fk_item_contrato FOREIGN KEY (contrato_id) REFERENCES contratos(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS eventos_asaas_checkout (
+                evento_id VARCHAR(100) NOT NULL,
+                tipo VARCHAR(80) NOT NULL,
+                checkout_id VARCHAR(100) DEFAULT NULL,
+                payload_json LONGTEXT NOT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (evento_id),
+                KEY idx_evento_checkout (checkout_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
+        conexao.commit()
+    finally:
+        cursor.close()
+
+
+def _asaas_config():
+    api_key = os.getenv("ASAAS_API_KEY", "").strip()
+    environment = os.getenv("ASAAS_ENV", "sandbox").strip().lower()
+    if environment not in {"sandbox", "production"}:
+        raise HTTPException(status_code=500, detail="ASAAS_ENV deve ser sandbox ou production.")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Pagamento temporariamente indisponível: ASAAS_API_KEY não configurada no backend.")
+    base_url = "https://api-sandbox.asaas.com/v3" if environment == "sandbox" else "https://api.asaas.com/v3"
+    return {
+        "api_key": api_key,
+        "base_url": base_url,
+        "user_agent": os.getenv("ASAAS_USER_AGENT", "PortalDaArte/1.0").strip() or "PortalDaArte/1.0",
+    }
+
+
+def _asaas_headers(config):
+    return {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "access_token": config["api_key"],
+        "User-Agent": config["user_agent"],
+    }
+
+
+def _callback_checkout_url(env_name: str, pedido_id: int, resultado: str):
+    base = os.getenv(env_name, "").strip() or "http://localhost:8081/pages/carrinho/carrinho"
+    parts = urlsplit(base)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update({"pedido": str(pedido_id), "checkout": resultado})
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _preco_fixo_servico(row: dict) -> Decimal:
+    try:
+        minimo = Decimal(str(row.get("preco_min"))) if row.get("preco_min") is not None else None
+        maximo = Decimal(str(row.get("preco_max"))) if row.get("preco_max") is not None else None
+    except (InvalidOperation, ValueError, TypeError):
+        raise HTTPException(status_code=409, detail=f"O serviço '{row.get('titulo', 'selecionado')}' não possui preço válido para compra direta.")
+    if minimo is None or minimo <= 0:
+        raise HTTPException(status_code=409, detail=f"O serviço '{row.get('titulo', 'selecionado')}' precisa de orçamento antes do pagamento.")
+    if maximo is not None and maximo != minimo:
+        raise HTTPException(status_code=409, detail=f"O serviço '{row.get('titulo', 'selecionado')}' possui faixa de preço e precisa de orçamento.")
+    return minimo.quantize(Decimal("0.01"))
+
+
+def _get_or_create_purchase_conversation(cursor, contratante_id: int, artista_id: int, servico_id: int) -> int:
+    cursor.execute("""
+        SELECT id FROM conversas
+        WHERE contratante_id = %s AND artista_id = %s AND servico_id = %s
+        ORDER BY id DESC LIMIT 1
+    """, (contratante_id, artista_id, servico_id))
+    row = cursor.fetchone()
+    if row:
+        return int(row["id"])
+    cursor.execute("INSERT INTO conversas (contratante_id, artista_id, servico_id) VALUES (%s, %s, %s)",
+                   (contratante_id, artista_id, servico_id))
+    return int(cursor.lastrowid)
+
+
+def _get_or_create_advance_contract_model(cursor) -> int:
+    cursor.execute("SELECT id FROM modelos_contrato WHERE ativo = TRUE AND tipo_pagamento = 'antecipado' ORDER BY id LIMIT 1")
+    row = cursor.fetchone()
+    if row:
+        return int(row["id"])
+    cursor.execute("""
+        INSERT INTO modelos_contrato (nome, tipo_pagamento, clausulas, versao, ativo)
+        VALUES ('Compra direta pelo carrinho', 'antecipado', %s, 1, TRUE)
+    """, ("Serviço adquirido pelo carrinho do Portal da Arte. O pagamento integral foi confirmado antes da ativação do contrato. O escopo corresponde ao serviço publicado pelo artista no momento da compra.",))
+    return int(cursor.lastrowid)
+
+
+def _materializar_pedido_pago(conexao, pedido_id: int):
+    """Cria propostas/contratos uma única vez após confirmação do Asaas."""
+    cursor = conexao.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT * FROM pedidos_carrinho WHERE id = %s FOR UPDATE", (pedido_id,))
+        pedido = cursor.fetchone()
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido de carrinho não encontrado.")
+        cursor.execute("SELECT * FROM pedido_carrinho_itens WHERE pedido_id = %s ORDER BY id FOR UPDATE", (pedido_id,))
+        itens = cursor.fetchall()
+        if not itens:
+            raise RuntimeError("Pedido sem itens.")
+
+        modelo_id = _get_or_create_advance_contract_model(cursor)
+        contratante_id = int(pedido["contratante_id"])
+        for item in itens:
+            if item.get("contrato_id"):
+                continue
+            artista_id = int(item["artista_id"])
+            servico_id = int(item["servico_id"])
+            valor = item["valor_unitario"]
+            conversa_id = _get_or_create_purchase_conversation(cursor, contratante_id, artista_id, servico_id)
+            descricao = f"Compra direta pelo carrinho: {item['titulo']}"
+            cursor.execute("""
+                INSERT INTO propostas
+                    (conversa_id, contratante_id, artista_id, servico_id, descricao_escopo,
+                     local_ou_modalidade, prazo_estimado, valor_proposto, status)
+                VALUES (%s, %s, %s, %s, %s, %s, NULL, %s, 'aceita')
+            """, (conversa_id, contratante_id, artista_id, servico_id, descricao,
+                  item.get("modalidade") or "ambos", valor))
+            proposta_id = int(cursor.lastrowid)
+            cursor.execute("""
+                INSERT INTO contratos
+                    (proposta_id, modelo_id, contratante_id, artista_id, valor_total, status,
+                     aceito_contratante_em, aceito_artista_em, data_inicio)
+                VALUES (%s, %s, %s, %s, %s, 'ativo', NOW(), NOW(), NOW())
+            """, (proposta_id, modelo_id, contratante_id, artista_id, valor))
+            contrato_id = int(cursor.lastrowid)
+            cursor.execute("""
+                INSERT INTO historico_contrato
+                    (contrato_id, status_anterior, status_novo, alterado_por, observacao)
+                VALUES (%s, NULL, 'ativo', %s, 'Contrato ativado após pagamento do carrinho')
+            """, (contrato_id, contratante_id))
+            cursor.execute("""
+                INSERT INTO mensagens (conversa_id, remetente_id, conteudo)
+                VALUES (%s, %s, %s)
+            """, (conversa_id, contratante_id,
+                  f"Pagamento confirmado para '{item['titulo']}'. Contrato #{contrato_id} ativado automaticamente."))
+            cursor.execute("UPDATE perfis_artista SET total_contratacoes = total_contratacoes + 1 WHERE usuario_id = %s", (artista_id,))
+            cursor.execute("UPDATE pedido_carrinho_itens SET proposta_id = %s, contrato_id = %s WHERE id = %s",
+                           (proposta_id, contrato_id, item["id"]))
+
+        cursor.execute("UPDATE pedidos_carrinho SET status = 'pago', pago_em = COALESCE(pago_em, NOW()) WHERE id = %s", (pedido_id,))
+    finally:
+        cursor.close()
+
+
+def _pedido_por_checkout(cursor, checkout_id: str):
+    cursor.execute("SELECT id FROM pedidos_carrinho WHERE checkout_externo_id = %s FOR UPDATE", (checkout_id,))
+    row = cursor.fetchone()
+    return int(row["id"]) if row else None
+
+
+@app.post("/api/carrinho/checkout", tags=["Carrinho"])
+def criar_checkout_carrinho(dados: CarrinhoCheckoutCreate, current_user: dict = Depends(get_usuario_atual)):
+    config = _asaas_config()
+    ids = list(dict.fromkeys(int(value) for value in dados.servico_ids if int(value) > 0))
+    if not ids:
+        raise HTTPException(status_code=400, detail="Seu carrinho está vazio.")
+    if len(ids) > 20:
+        raise HTTPException(status_code=400, detail="O carrinho aceita no máximo 20 serviços por pagamento.")
+
+    conexao = None
+    cursor = None
+    pedido_id = None
+    try:
+        conexao = get_db_connection()
+        _ensure_cart_schema(conexao)
+        cursor = conexao.cursor(dictionary=True)
+        placeholders = ",".join(["%s"] * len(ids))
+        cursor.execute(f"""
+            SELECT s.id, s.artista_id, s.titulo, s.descricao, s.preco_min, s.preco_max, s.modalidade,
+                   COALESCE(pa.nome_artistico, p.nome_completo, u.email, 'Artista') AS artista_nome
+            FROM servicos s
+            INNER JOIN perfis_artista pa ON pa.usuario_id = s.artista_id
+            INNER JOIN usuarios u ON u.id = s.artista_id
+            LEFT JOIN perfis p ON p.usuario_id = s.artista_id
+            WHERE s.ativo = TRUE AND s.id IN ({placeholders})
+        """, tuple(ids))
+        rows = cursor.fetchall()
+        by_id = {int(row["id"]): row for row in rows}
+        missing = [value for value in ids if value not in by_id]
+        if missing:
+            raise HTTPException(status_code=409, detail="Um ou mais serviços do carrinho não estão mais disponíveis. Atualize o carrinho.")
+
+        itens = []
+        total = Decimal("0.00")
+        for servico_id in ids:
+            row = by_id[servico_id]
+            if int(row["artista_id"]) == int(current_user["id"]):
+                raise HTTPException(status_code=409, detail=f"Você não pode comprar seu próprio serviço: {row['titulo']}.")
+            preco = _preco_fixo_servico(row)
+            total += preco
+            itens.append((row, preco))
+
+        cursor.execute("INSERT INTO pedidos_carrinho (contratante_id, status, valor_total) VALUES (%s, 'criando', %s)",
+                       (int(current_user["id"]), total))
+        pedido_id = int(cursor.lastrowid)
+        for row, preco in itens:
+            cursor.execute("""
+                INSERT INTO pedido_carrinho_itens
+                    (pedido_id, servico_id, artista_id, titulo, descricao, modalidade, valor_unitario)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (pedido_id, row["id"], row["artista_id"], row["titulo"], row.get("descricao"), row.get("modalidade"), preco))
+        conexao.commit()
+
+        payload = {
+            "billingTypes": ["PIX", "CREDIT_CARD"],
+            "chargeTypes": ["DETACHED"],
+            "minutesToExpire": 60,
+            "externalReference": f"portal-arte-pedido-{pedido_id}",
+            "callback": {
+                "successUrl": _callback_checkout_url("ASAAS_CHECKOUT_SUCCESS_URL", pedido_id, "success"),
+                "cancelUrl": _callback_checkout_url("ASAAS_CHECKOUT_CANCEL_URL", pedido_id, "cancel"),
+                "expiredUrl": _callback_checkout_url("ASAAS_CHECKOUT_EXPIRED_URL", pedido_id, "expired"),
+            },
+            "items": [
+                {
+                    "name": row["titulo"][:100],
+                    "description": (row.get("descricao") or f"Serviço de {row.get('artista_nome') or 'artista'}")[:500],
+                    "quantity": 1,
+                    "value": float(preco),
+                }
+                for row, preco in itens
+            ],
+        }
+        with httpx.Client(timeout=20.0) as client:
+            response = client.post(f"{config['base_url']}/checkouts", headers=_asaas_headers(config), json=payload)
+        try:
+            result = response.json()
+        except Exception:
+            result = {}
+        if response.status_code < 200 or response.status_code >= 300:
+            detalhe = result.get("errors") or result.get("message") or "O provedor de pagamento recusou a criação do checkout."
+            cursor.execute("UPDATE pedidos_carrinho SET status = 'erro' WHERE id = %s", (pedido_id,))
+            conexao.commit()
+            raise HTTPException(status_code=502, detail=detalhe)
+        checkout_id = str(result.get("id") or "").strip()
+        if not checkout_id:
+            cursor.execute("UPDATE pedidos_carrinho SET status = 'erro' WHERE id = %s", (pedido_id,))
+            conexao.commit()
+            raise HTTPException(status_code=502, detail="O Asaas não retornou o identificador do checkout.")
+        cursor.execute("UPDATE pedidos_carrinho SET checkout_externo_id = %s, status = 'aguardando_pagamento' WHERE id = %s",
+                       (checkout_id, pedido_id))
+        conexao.commit()
+        return {
+            "status": "sucesso",
+            "pedido_id": pedido_id,
+            "checkout_id": checkout_id,
+            "checkout_url": f"https://asaas.com/checkoutSession/show?id={checkout_id}",
+            "valor_total": float(total),
+            "itens": len(itens),
+        }
+    except HTTPException:
+        if conexao:
+            try: conexao.rollback()
+            except Exception: pass
+        raise
+    except httpx.RequestError:
+        if conexao and pedido_id:
+            try:
+                if cursor:
+                    cursor.execute("UPDATE pedidos_carrinho SET status = 'erro' WHERE id = %s", (pedido_id,))
+                    conexao.commit()
+            except Exception:
+                pass
+        raise HTTPException(status_code=503, detail="Não foi possível conectar ao Asaas. Tente novamente.")
+    except Exception:
+        if conexao:
+            try: conexao.rollback()
+            except Exception: pass
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível preparar o pagamento do carrinho.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.get("/api/carrinho/pedidos/{pedido_id}", tags=["Carrinho"])
+def consultar_pedido_carrinho(pedido_id: int, current_user: dict = Depends(get_usuario_atual)):
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        _ensure_cart_schema(conexao)
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT id, contratante_id, checkout_externo_id, status, valor_total, criado_em, atualizado_em, pago_em
+            FROM pedidos_carrinho WHERE id = %s AND contratante_id = %s
+        """, (pedido_id, int(current_user["id"])))
+        pedido = cursor.fetchone()
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+        cursor.execute("""
+            SELECT servico_id, artista_id, titulo, descricao, modalidade, valor_unitario, proposta_id, contrato_id
+            FROM pedido_carrinho_itens WHERE pedido_id = %s ORDER BY id
+        """, (pedido_id,))
+        itens = cursor.fetchall()
+        for row in itens:
+            row["valor_unitario"] = float(row["valor_unitario"])
+        pedido["valor_total"] = float(pedido["valor_total"])
+        for field in ("criado_em", "atualizado_em", "pago_em"):
+            if pedido.get(field) is not None and hasattr(pedido[field], "isoformat"):
+                pedido[field] = pedido[field].isoformat()
+        pedido["status_label"] = CARRINHO_STATUS_PUBLICOS.get(pedido["status"], pedido["status"])
+        pedido["itens"] = itens
+        return {"pedido": pedido}
+    except HTTPException:
+        raise
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível consultar o pedido.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
+
+
+@app.post("/api/webhooks/asaas/checkout", tags=["Webhooks"])
+async def webhook_asaas_checkout(request: Request):
+    expected = os.getenv("ASAAS_WEBHOOK_TOKEN", "").strip()
+    received = request.headers.get("asaas-access-token", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="Webhook Asaas ainda não configurado.")
+    if not received or not hmac.compare_digest(expected, received):
+        raise HTTPException(status_code=401, detail="Token de webhook inválido.")
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Payload JSON inválido.")
+
+    event_id = str(payload.get("id") or "").strip()
+    event_type = str(payload.get("event") or payload.get("type") or "").strip().upper()
+    checkout = payload.get("checkout") if isinstance(payload.get("checkout"), dict) else {}
+    checkout_id = str(checkout.get("id") or payload.get("checkoutId") or "").strip()
+    external_reference = str(checkout.get("externalReference") or payload.get("externalReference") or "").strip()
+    if not event_id or not event_type:
+        raise HTTPException(status_code=400, detail="Evento Asaas incompleto.")
+
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        _ensure_cart_schema(conexao)
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("SELECT evento_id FROM eventos_asaas_checkout WHERE evento_id = %s", (event_id,))
+        if cursor.fetchone():
+            return {"received": True, "duplicate": True}
+        cursor.execute("""
+            INSERT INTO eventos_asaas_checkout (evento_id, tipo, checkout_id, payload_json)
+            VALUES (%s, %s, %s, %s)
+        """, (event_id, event_type, checkout_id or None, json.dumps(payload, ensure_ascii=False, default=str)))
+        pedido_id = _pedido_por_checkout(cursor, checkout_id) if checkout_id else None
+        if not pedido_id and external_reference.startswith("portal-arte-pedido-"):
+            try:
+                candidato = int(external_reference.removeprefix("portal-arte-pedido-"))
+                cursor.execute("SELECT id FROM pedidos_carrinho WHERE id = %s FOR UPDATE", (candidato,))
+                pedido_id = candidato if cursor.fetchone() else None
+            except ValueError:
+                pedido_id = None
+        if pedido_id:
+            if event_type == "CHECKOUT_PAID":
+                _materializar_pedido_pago(conexao, pedido_id)
+            elif event_type == "CHECKOUT_CANCELED":
+                cursor.execute("UPDATE pedidos_carrinho SET status = 'cancelado' WHERE id = %s AND status <> 'pago'", (pedido_id,))
+            elif event_type == "CHECKOUT_EXPIRED":
+                cursor.execute("UPDATE pedidos_carrinho SET status = 'expirado' WHERE id = %s AND status <> 'pago'", (pedido_id,))
+        conexao.commit()
+        return {"received": True}
+    except Exception:
+        if conexao: conexao.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível processar o evento de pagamento.")
     finally:
         if cursor: cursor.close()
         if conexao: conexao.close()
@@ -2030,3 +2859,9 @@ def abrir_ocorrencia(tipo: str, assunto: str, descricao: str, current_user: dict
     finally:
         if cursor: cursor.close()
         if conexao: conexao.close()
+
+# --- Rotas financeiras Asaas Sandbox (modulo pagamentos) ---
+# Mantem o fluxo PIX/NFS-e legado separado do Checkout do carrinho.
+# O modulo usa apenas o ambiente Sandbox do Asaas.
+from pagamentos import criar_router as criar_router_pagamentos
+app.include_router(criar_router_pagamentos(get_db_connection, get_usuario_atual))

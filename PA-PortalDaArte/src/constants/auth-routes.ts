@@ -7,7 +7,7 @@
 //   /pages/contratacoes/contratacoes
 //   /pages/mensagens/mensagens
 //   /pages/perfil/perfil
-//   /pages/perfil_publico/perfil_publico   (perfil completo do artista)
+// O perfil público do artista é público; ações dentro dele podem exigir autenticação.
 //
 // Este arquivo fica fora de src/app/ de propósito: tudo dentro de src/app/
 // vira rota no Expo Router.
@@ -19,14 +19,17 @@ export const DISCOVER_ROUTE = "/pages/explorar/explorar";
 export const ARTIST_PROFILE_ROUTE = "/pages/perfil_publico/perfil_publico";
 export const FAVORITES_ROUTE = "/pages/favoritos/favoritos";
 export const SETTINGS_ROUTE = "/pages/configuracoes/configuracoes";
+export const CART_ROUTE = "/pages/carrinho/carrinho";
 
 const PUBLIC_ROUTES = new Set<string>([
   "/",
   "/index",
   DISCOVER_ROUTE,
+  ARTIST_PROFILE_ROUTE,
   LOGIN_ROUTE,
   REGISTER_ROUTE,
   SETTINGS_ROUTE,
+  CART_ROUTE,
 ]);
 
 /** Remove query/hash/.html/barra final e padroniza caixa, para comparar rotas com segurança. */

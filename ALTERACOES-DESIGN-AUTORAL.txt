@@ -1,0 +1,133 @@
+PORTAL DA ARTE - REDESIGN AUTORAL DA INTERFACE
+Data: 20/11/2026
+
+OBJETIVO
+Eliminar a aparência genérica de dashboard/template e reforçar uma identidade própria para o Portal da Arte, preservando usabilidade, acessibilidade, responsividade e os fluxos funcionais já implementados.
+
+DIREÇÃO VISUAL
+- Linguagem visual inspirada em ateliê/editorial contemporâneo.
+- Paleta quente: marrom profundo, marfim, laranja queimado, dourado e tons artísticos complementares.
+- Contraste maior entre navegação, conteúdo e ações.
+- Tipografia serifada usada em títulos e nomes de artistas para criar caráter editorial.
+- Bordas mais orgânicas, sombras suaves e superfícies com profundidade moderada.
+- Redução da aparência de componentes "padrão de dashboard".
+
+MUDANÇAS PRINCIPAIS
+
+1. IDENTIDADE DA MARCA
+- Criado o componente BrandMark.tsx.
+- Novo monograma "PA" com composição geométrica e detalhe dourado.
+- Aplicado na Sidebar, Header, Login, Cadastro, menu móvel e modal de autenticação.
+- Nova assinatura verbal: "arte que encontra oportunidade".
+
+2. SISTEMA DE CORES
+- Novo tema claro com fundo marfim, superfícies creme e Sidebar marrom profundo.
+- Novo tema escuro com superfícies grafite/azul profundo e laranja quente.
+- Alto contraste preservado com preto, branco e azul de ação.
+- Novos tokens específicos para marca, hero, dourado, rosa, ameixa, sombras e Sidebar.
+
+3. SIDEBAR
+- Sidebar clara anterior substituída por uma navegação escura e mais marcante no modo claro.
+- Itens ativos agora usam contraste forte, ícones em cápsulas e indicador visual.
+- Incluído card editorial "Feito para quem vive de criar".
+- Configurações mantidas no rodapé.
+
+4. HEADER
+- Header transformado em toolbar flutuante dentro do fundo da página.
+- Busca integrada em uma superfície mais suave.
+- Ícones e avatar com formato e espaçamento padronizados.
+- Marca atualizada para visitantes e mobile.
+- Drawer móvel atualizado com a identidade da marca.
+
+5. DESCOBRIR ARTISTAS
+- Nova abertura editorial com mensagem de descoberta e contador de talentos.
+- Cards de artistas redesenhados como mini-portfólios:
+  * imagem maior e retangular;
+  * estilo sobreposto à imagem;
+  * favorito em botão flutuante;
+  * nome em tipografia editorial;
+  * avaliação e distância em hierarquia secundária;
+  * preço separado como informação comercial;
+  * CTA compacto "Ver perfil" com ícone.
+- Área de catálogo, filtros e ordenação refinada.
+
+6. FAVORITOS
+- Novo hero "Sua curadoria pessoal".
+- Cards com faixa de destaque, avatar mais expressivo e tipografia reforçada.
+- Botões e preços reorganizados visualmente.
+
+7. CONTRATAÇÕES
+- Novo hero "Contratações em movimento".
+- Cards de proposta com faixa de destaque, status visual e chevron em cápsula.
+- Tela de detalhes ganhou abertura editorial e card principal mais sofisticado.
+- Tela Contratar ganhou hero próprio, formulário com bordas maiores e card comercial refinado.
+
+8. MENSAGENS
+- Lista de conversas passou a usar cards separados, em vez de uma lista plana.
+- Conversa ativa usa cor de destaque e borda de acento.
+- Header da conversa ganhou superfície flutuante.
+- Balões têm raios maiores e espaçamento mais confortável.
+- Campo de mensagem e botão de envio ganharam formas mais consistentes com o restante do produto.
+
+9. PERFIL DO USUÁRIO
+- Cabeçalho do perfil transformado em card principal com faixa de destaque.
+- Avatar ficou maior e menos genérico.
+- Nome passou a usar hierarquia editorial.
+- Cards de biografia/seções ganharam borda de acento, raio maior e sombra suave.
+
+10. PERFIL PÚBLICO
+- Hero do artista passou para fundo escuro editorial.
+- Foto com moldura de acento e formato mais autoral.
+- Nome, categoria, localização e avaliação têm nova hierarquia visual.
+- Ações Mensagem/Contratar foram redesenhadas.
+- Seções, portfólio e vídeos ganharam cards com mais profundidade e identidade.
+
+11. LOGIN / CADASTRO / RECUPERAÇÃO DE SENHA
+- Marca aplicada no topo dos formulários.
+- Cards com borda superior de acento e raios maiores.
+- Inputs e botões mais arredondados e consistentes.
+- Temas claro, escuro e alto contraste continuam funcionando.
+
+12. CONFIGURAÇÕES / ACESSIBILIDADE
+- Novo hero "Conforto também faz parte da experiência".
+- Cards de acessibilidade ganharam borda lateral de acento e hierarquia melhor.
+- Aba, pré-visualização e controles mantêm o comportamento existente.
+
+13. MODAL DE AUTENTICAÇÃO
+- Novo cabeçalho de marca.
+- Texto editorial e card com borda superior de acento.
+- Botões compatíveis com o novo sistema visual.
+
+14. WEB
+- Scrollbars discretas.
+- Seleção de texto personalizada.
+- Suavização de fonte e renderização de texto refinadas.
+- Foco visível e prefers-reduced-motion continuam preservados.
+
+ACESSIBILIDADE PRESERVADA
+- VLibras mantido.
+- Tamanho de fonte até 200% mantido.
+- Alto contraste mantido.
+- Espaçamento ampliado mantido.
+- TalkBack/VoiceOver mantidos.
+- Auditoria estática: 0 itens HIGH / 0 itens MEDIUM.
+
+VALIDAÇÕES REALIZADAS
+- TypeScript: 0 erros.
+- Expo Web: export concluído, 16 rotas estáticas.
+- Expo Android: bundle concluído com assets do VLibras.
+- Expo iOS: bundle concluído com assets do VLibras.
+- Expo dependency check: dependências compatíveis pelo mapa local do SDK 54.
+- Backend Python: py_compile concluído sem erro de sintaxe.
+
+OBSERVAÇÃO
+O Chromium headless disponível no ambiente não conseguiu concluir a geração automática de screenshots devido às limitações do processo gráfico/DBus do container. Portanto, a validação visual final deve ser conferida também em navegador/dispositivo real após iniciar o projeto. Os builds e validações estruturais passaram.
+
+
+AJUSTE DE PALETA (20/11/2026)
+- Mantido o redesign autoral/estilizado.
+- Restaurada a paleta da versão refinada anterior.
+- Tema claro: creme suave, branco, marrom escuro e laranja queimado original da versão anterior.
+- Tema escuro: azul-marinho profundo, superfícies azuladas e laranja da versão anterior.
+- Removidos do tema visual os novos dourados/plum/bordôs introduzidos apenas no redesign.
+- Alto contraste preservado.
