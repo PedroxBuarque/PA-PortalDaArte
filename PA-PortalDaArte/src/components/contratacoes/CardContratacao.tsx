@@ -37,6 +37,10 @@ function getStatusColor(status: string) {
       return '#56CCF2';
     case 'Concluido':
       return '#27AE60';
+    case 'Recusada':
+      return '#C0392B';
+    case 'Expirada':
+      return '#6B7280';
     default:
       return '#BDBDBD';
   }

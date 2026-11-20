@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../../components/context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getArtista } from '../../../components/dados/artistas';
 import Header from '../../../components/Header';
 import Sidebar from '../../../components/Sidebar';
 
@@ -42,11 +41,11 @@ export interface Artista {
 }
 
 export type StatusContratacao =
-   'pendente'
-   'aceita'
-   'recusada'
-   'aguardando_cliente'
-   'cancelada';
+  | 'pendente'
+  | 'aceita'
+  | 'recusada'
+  | 'aguardando_cliente'
+  | 'cancelada';
 
 export interface SolicitacaoContratacao {
   artistaId: Artista['id'];
@@ -95,7 +94,7 @@ type FormState = {
 type FormErrors = Partial<Record<keyof FormState, string>>;
 
 interface ContratarScreenProps {
-  /** Envia a solicitação (API, Firebase etc.). Se não for passado, só mostra um aviso. */
+  /** Permite injetar um envio alternativo em testes; no app normal usa a API do Portal da Arte. */
   onSubmit?: (payload: SolicitacaoContratacao) => Promise<void> | void;
 }
 
@@ -345,56 +344,103 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
   const params = useLocalSearchParams();
   const meuId = useMeuId(); // id do usuário logado (null se não logado)
 
-  // O artista chega pela URL (expo-router): contratarParams(artist) no perfil.
-  // Aceita nomes em português e em inglês para os parâmetros.
-  // Não existe artista fixo: se nada identificar o artista, a tela avisa (artista = null).
-  const artista: Artista | null = useMemo(() => {
-    const p = (k: string): string | undefined => {
-      const v = (params as Record<string, string | string[] | undefined>)[k];
-      return Array.isArray(v) ? v[0] : v;
+  // O artista chega pela URL (expo-router). Quando a URL traz só o id,
+  // buscamos os dados na API pública para que acessos diretos também funcionem.
+  const param = (key: string): string | undefined => {
+    const value = (params as Record<string, string | string[] | undefined>)[key];
+    return Array.isArray(value) ? value[0] : value;
+  };
+  const artistIdParam = param('id') ?? param('artistaId') ?? param('artistId');
+
+  const artistaPorParams: Artista | null = useMemo(() => {
+    const id = (() => {
+      const value = (params as Record<string, string | string[] | undefined>).id
+        ?? (params as Record<string, string | string[] | undefined>).artistaId
+        ?? (params as Record<string, string | string[] | undefined>).artistId;
+      return Array.isArray(value) ? value[0] : value;
+    })();
+    const read = (key: string): string | undefined => {
+      const value = (params as Record<string, string | string[] | undefined>)[key];
+      return Array.isArray(value) ? value[0] : value;
     };
+    const nome = read('nome') ?? read('name');
+    if (!nome) return null;
 
-    const id = p('id') ?? p('artistaId') ?? p('artistId');
-    const nome = p('nome') ?? p('name');
-
-    // 1) Dados completos enviados pela URL
-    if (nome) {
-      const minimo = Number(p('valorMinimo'));
-      const negociar = p('aceitaNegociar');
-      return {
-        id: id ?? '',
-        nome,
-        estilo: p('estilo') ?? p('style') ?? '',
-        nota: Number(p('nota') ?? p('rating')) || 0,
-        avaliacoes: Number(p('avaliacoes') ?? p('reviewsCount')) || 0,
-        valorBase: Number(p('valorBase') ?? p('priceFrom')) || 0,
-        aceitaNegociar: negociar === 'true' || negociar === '1',
-        valorMinimo: minimo > 0 ? minimo : undefined,
-      };
-    }
-
-    // 2) Só o id na URL: busca o artista pelo id (mesma função do perfil)
-    if (id) {
-      const a = getArtista(id);
-      if (a) {
-        return {
-          id: a.id,
-          nome: a.name,
-          estilo: a.style,
-          nota: a.rating,
-          avaliacoes: a.reviewsCount,
-          valorBase: a.priceFrom,
-          aceitaNegociar: false,
-        };
-      }
-    }
-
-    return null;
+    const minimo = Number(read('valorMinimo'));
+    const negociar = read('aceitaNegociar');
+    return {
+      id: id ?? '',
+      nome,
+      estilo: read('estilo') ?? read('style') ?? '',
+      nota: Number(read('nota') ?? read('rating')) || 0,
+      avaliacoes: Number(read('avaliacoes') ?? read('reviewsCount')) || 0,
+      valorBase: Number(read('valorBase') ?? read('priceFrom')) || 0,
+      aceitaNegociar: negociar === 'true' || negociar === '1',
+      valorMinimo: minimo > 0 ? minimo : undefined,
+    };
   }, [params]);
+
+  const [artistaRemoto, setArtistaRemoto] = useState<Artista | null>(null);
+  const [carregandoArtista, setCarregandoArtista] = useState(false);
+
+  useEffect(() => {
+    if (artistaPorParams || !artistIdParam) {
+      setArtistaRemoto(null);
+      setCarregandoArtista(false);
+      return;
+    }
+
+    let active = true;
+    setCarregandoArtista(true);
+    fetch(`${URL_API}/api/artistas`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        if (!active) return;
+        const raw = Array.isArray(data?.artistas)
+          ? data.artistas.find((item: any) => String(item?.id ?? item?.artista_id) === String(artistIdParam))
+          : null;
+        if (!raw) {
+          setArtistaRemoto(null);
+          return;
+        }
+        const services = Array.isArray(raw.servicos) ? raw.servicos : [];
+        const prices = services
+          .map((service: any) => Number(service?.preco_min ?? service?.preco ?? 0))
+          .filter((value: number) => Number.isFinite(value) && value > 0);
+        const valorBase = prices.length ? Math.min(...prices) : 0;
+        const categorias = Array.isArray(raw.categorias) ? raw.categorias.filter(Boolean) : [];
+        setArtistaRemoto({
+          id: raw.id ?? raw.artista_id ?? artistIdParam,
+          nome: raw.nome_artistico || raw.nome || `Artista ${artistIdParam}`,
+          estilo: categorias.join(' • ') || raw.categoria_atuacao || raw.estilo_musical || '',
+          nota: Number(raw.avaliacao_media ?? raw.nota_media ?? 0) || 0,
+          avaliacoes: Number(raw.total_avaliacoes ?? 0) || 0,
+          valorBase,
+          aceitaNegociar: Boolean(raw.aceita_negociar ?? raw.aceitaNegociar) || valorBase <= 0,
+          valorMinimo: undefined,
+        });
+      })
+      .catch((error) => {
+        console.warn('[Contratação] Não foi possível carregar o artista:', error);
+        if (active) setArtistaRemoto(null);
+      })
+      .finally(() => {
+        if (active) setCarregandoArtista(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [artistIdParam, artistaPorParams]);
+
+  const artista = artistaPorParams ?? artistaRemoto;
 
   const valorBase = artista?.valorBase ?? 0;
   const valorMinimo = artista?.valorMinimo;
-  const podeNegociar = artista?.aceitaNegociar === true;
+  const podeNegociar = artista?.aceitaNegociar === true || valorBase <= 0;
 
   const { width } = useWindowDimensions();
   const twoCols = width >= 700; // formulário em 2 colunas
@@ -420,8 +466,8 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
     };
 
   const valorNumero = parseMoeda(form.valor);
-  // Só negocia se o artista permite E o cliente ligou o switch
-  const negociando = podeNegociar && form.negociar;
+  // Sem preço-base, o valor proposto é obrigatório. Com preço-base, a negociação é opcional.
+  const negociando = valorBase <= 0 || (podeNegociar && form.negociar);
   const total = negociando ? valorNumero : valorBase;
 
   const desconto = useMemo<number | null>(() => {
@@ -460,7 +506,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
     if (negociando) {
       if (!valorNumero) {
         e.valor = 'Informe o valor proposto.';
-      } else if (valorNumero > valorBase) {
+      } else if (valorBase > 0 && valorNumero > valorBase) {
         e.valor = `A proposta não pode ser maior que ${formatBRL(valorBase)}.`;
       } else if (valorMinimo && valorNumero < valorMinimo) {
         e.valor = `O artista não aceita propostas abaixo de ${formatBRL(valorMinimo)}.`;
@@ -519,20 +565,55 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
 
     try {
       setEnviando(true);
+      let propostaId: number | null = null;
       if (onSubmit) {
         await onSubmit(payload);
       } else {
-        // TODO: enviar ao backend (POST da contratação). Por enquanto só registra no console.
-        console.log('Solicitação de contratação:', payload);
+        const token = await AsyncStorage.getItem('access_token');
+        if (!token) throw new Error('Sua sessão expirou. Entre novamente para contratar.');
+        const artistaId = Number(artista.id);
+        if (!Number.isInteger(artistaId) || artistaId <= 0) throw new Error('Artista inválido. Abra o perfil novamente.');
+
+        const conversaResponse = await fetch(`${URL_API}/api/conversas`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ artista_id: artistaId }),
+        });
+        const conversaData = await conversaResponse.json().catch(() => ({}));
+        if (!conversaResponse.ok || !conversaData?.conversa_id) {
+          throw new Error(conversaData?.detail || 'Não foi possível iniciar a conversa com o artista.');
+        }
+
+        const descricaoEscopo = [
+          payload.servico.descricao,
+          `Data de início: ${payload.datas.inicio}`,
+          payload.mensagemNegociacao ? `Mensagem de negociação: ${payload.mensagemNegociacao}` : '',
+        ].filter(Boolean).join('\n');
+
+        const propostaResponse = await fetch(`${URL_API}/api/propostas`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversa_id: Number(conversaData.conversa_id),
+            descricao_escopo: descricaoEscopo,
+            local_ou_modalidade: payload.servico.local,
+            prazo_estimado: payload.datas.prazo,
+            valor_proposto: payload.total,
+          }),
+        });
+        const propostaData = await propostaResponse.json().catch(() => ({}));
+        if (!propostaResponse.ok || !propostaData?.proposta_id) {
+          throw new Error(propostaData?.detail || 'Não foi possível registrar a proposta.');
+        }
+        propostaId = Number(propostaData.proposta_id);
       }
       notify(
         'Sucesso',
-        negociando
-          ? form.aceitaValorBase
-            ? `Proposta enviada! Se o artista recusar, a contratação fecha por ${formatBRL(valorBase)}.`
-            : 'Proposta enviada! Se o artista recusar o valor, você será avisado para confirmar ou cancelar.'
-          : 'Solicitação enviada! O artista vai aceitar ou recusar o pedido.'
+        'Solicitação enviada e registrada. O artista poderá aceitar ou recusar pela área de Contratações.'
       );
+      if (propostaId) {
+        router.replace({ pathname: '/pages/contratacoes/detalhes', params: { id: String(propostaId) } } as any);
+      }
     } catch (err) {
       console.error('Erro ao enviar contratação:', err);
       notify('Erro', 'Não foi possível enviar a solicitação. Tente novamente.');
@@ -722,11 +803,26 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
     </View>
   );
 
+  if (carregandoArtista) {
+    return (
+      <View style={[styles.root, { backgroundColor: theme.mainBg }]}>
+        <Sidebar />
+        <View style={{ flex: 1 }}>
+          <Header />
+          <View style={{ padding: 24, gap: 12 }}>
+            <Text style={[styles.title, { color: theme.textPrimary }]}>Carregando artista...</Text>
+            <Text style={[styles.hint, { color: theme.textSecondary }]}>Aguarde enquanto buscamos os dados da contratação.</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   // Nenhum artista identificado (acesso direto à tela, sem escolher alguém)
   if (!artista) {
     return (
       <View style={[styles.root, { backgroundColor: theme.mainBg }]}>
-        <Sidebar activeRoute="contratacoes" />
+        <Sidebar />
         <View style={{ flex: 1 }}>
           <Header />
           <View style={{ padding: 24, gap: 12 }}>
@@ -753,7 +849,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
   if (ehProprioPerfil) {
     return (
       <View style={[styles.root, { backgroundColor: theme.mainBg }]}>
-        <Sidebar activeRoute="contratacoes" />
+        <Sidebar />
         <View style={{ flex: 1 }}>
           <Header />
           <View style={{ padding: 24, gap: 12 }}>
@@ -778,7 +874,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
 
   return (
     <View style={[styles.root, { backgroundColor: theme.mainBg }]}>
-      <Sidebar activeRoute="contratacoes" />
+      <Sidebar />
 
       <View style={{ flex: 1 }}>
         <Header />

@@ -9,6 +9,8 @@ import { refreshSession } from "../../../components/context/AuthContext";
 import { buildRegisterHref, DISCOVER_ROUTE, sanitizeRedirect } from "../../../constants/auth-routes";
 
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
+import { useAccessibility } from '../../../components/accessibility/AccessibilityContext';
+import { useTheme } from '../../../components/context/ThemeContext';
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 // Respostas de validação (422) podem trazer uma lista em detail, não um texto.
@@ -29,6 +31,10 @@ function utf8ByteLength(value: string): number {
 const INVALID_RESET_LINK = "Este link é inválido, expirou ou já foi usado. Solicite um novo link.";
 
 export default function LoginScreen() {
+  const { theme } = useTheme();
+  const { highContrast } = useAccessibility();
+  const styles = getStyles(theme, highContrast);
+
   // Destino que o visitante queria abrir antes de ser mandado ao login (validado: só rotas internas).
   const params = useLocalSearchParams<{
     redirect?: string | string[];
@@ -85,8 +91,9 @@ export default function LoginScreen() {
       if (!active || cleared || !navigationRef.isReady()) return;
 
       // Um evento antigo não deve apagar um novo link antes de sua captura.
-      const routeParams = navigationRef.getCurrentRoute()?.params as
-        { token?: string | string[] } | undefined;
+      const routeParams = (navigationRef.getCurrentRoute() as
+        | { params?: { token?: string | string[] } }
+        | undefined)?.params;
       if (JSON.stringify(routeParams?.token) !== incomingTokenKey) return;
 
       // setParams também emite eventos de navegação: marque antes de chamá-lo.
@@ -317,7 +324,7 @@ export default function LoginScreen() {
           <View style={styles.loginCard}>
             <TouchableOpacity onPress={closeRecovery} disabled={isSubmittingRecovery} style={styles.backButton}
               accessibilityRole="button">
-              <ArrowLeft size={18} color="#E15743" />
+              <ArrowLeft size={18} color={highContrast ? theme.accent : "#E15743"} />
               <Text style={styles.backText}>Voltar para o login</Text>
             </TouchableOpacity>
 
@@ -330,12 +337,12 @@ export default function LoginScreen() {
               <>
                 <Text style={styles.label}>Nova senha</Text>
                 <View style={styles.passwordContainer}>
-                  <Lock size={16} color="#9D8E85" style={styles.lockIcon} />
+                  <Lock size={16} color={highContrast ? theme.textSecondary : "#9D8E85"} style={styles.lockIcon} />
                   <TextInput
                     value={newPassword}
                     onChangeText={(value) => { setNewPassword(value); if (error) setError(""); }}
                     placeholder="••••••••"
-                    placeholderTextColor="#9D8E85"
+                    placeholderTextColor={highContrast ? theme.textSecondary : "#9D8E85"}
                     secureTextEntry
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -349,12 +356,12 @@ export default function LoginScreen() {
 
                 <Text style={styles.label}>Confirmar nova senha</Text>
                 <View style={styles.passwordContainer}>
-                  <Lock size={16} color="#9D8E85" style={styles.lockIcon} />
+                  <Lock size={16} color={highContrast ? theme.textSecondary : "#9D8E85"} style={styles.lockIcon} />
                   <TextInput
                     value={confirmPassword}
                     onChangeText={(value) => { setConfirmPassword(value); if (error) setError(""); }}
                     placeholder="••••••••"
-                    placeholderTextColor="#9D8E85"
+                    placeholderTextColor={highContrast ? theme.textSecondary : "#9D8E85"}
                     secureTextEntry
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -410,7 +417,7 @@ export default function LoginScreen() {
           <View style={styles.loginCard}>
             <TouchableOpacity onPress={closeRecovery} disabled={isSubmittingRecovery} style={styles.backButton}
               accessibilityRole="button">
-              <ArrowLeft size={18} color="#E15743" />
+              <ArrowLeft size={18} color={highContrast ? theme.accent : "#E15743"} />
               <Text style={styles.backText}>Voltar para o login</Text>
             </TouchableOpacity>
 
@@ -422,7 +429,7 @@ export default function LoginScreen() {
 
             <Text style={styles.label}>E-mail</Text>
             <View style={styles.iconInputContainer}>
-              <Mail size={16} color="#9D8E85" style={styles.inputIcon} />
+              <Mail size={16} color={highContrast ? theme.textSecondary : "#9D8E85"} style={styles.inputIcon} />
               <TextInput
                 value={recoveryEmail}
                 editable={!isSubmittingRecovery}
@@ -432,7 +439,7 @@ export default function LoginScreen() {
                   if (recoveryMessage) setRecoveryMessage("");
                 }}
                 placeholder="nome@email.com"
-                placeholderTextColor="#9D8E85"
+                placeholderTextColor={highContrast ? theme.textSecondary : "#9D8E85"}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -504,7 +511,7 @@ export default function LoginScreen() {
               if (error) setError("");
             }}
             placeholder="nome@email.com"
-            placeholderTextColor="#9D8E85"
+            placeholderTextColor={highContrast ? theme.textSecondary : "#9D8E85"}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
@@ -514,7 +521,7 @@ export default function LoginScreen() {
 
           <Text style={styles.label}>Senha</Text>
           <View style={styles.passwordContainer}>
-            <Lock size={16} color="#9D8E85" style={styles.lockIcon} />
+            <Lock size={16} color={highContrast ? theme.textSecondary : "#9D8E85"} style={styles.lockIcon} />
             <TextInput
               value={password}
               onChangeText={(value) => {
@@ -522,7 +529,7 @@ export default function LoginScreen() {
                 if (error) setError("");
               }}
               placeholder="••••••••"
-              placeholderTextColor="#9D8E85"
+              placeholderTextColor={highContrast ? theme.textSecondary : "#9D8E85"}
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
@@ -568,13 +575,13 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#FFF1E6" },
+const getStyles = (theme: any, highContrast: boolean) => StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: highContrast ? theme.mainBg : "#FFF1E6" },
   container: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#FFF1E6",
+    backgroundColor: highContrast ? theme.mainBg : "#FFF1E6",
     padding: 20,
   },
   circleTopLeft: {
@@ -582,7 +589,7 @@ const styles = StyleSheet.create({
     width: 320,
     height: 320,
     borderRadius: 160,
-    backgroundColor: "#FFE9D2",
+    backgroundColor: highContrast ? "transparent" : "#FFE9D2",
     top: -100,
     left: -80,
   },
@@ -591,7 +598,7 @@ const styles = StyleSheet.create({
     width: 380,
     height: 380,
     borderRadius: 190,
-    backgroundColor: "#F9DDD0",
+    backgroundColor: highContrast ? "transparent" : "#F9DDD0",
     top: -40,
     right: -60,
   },
@@ -600,27 +607,29 @@ const styles = StyleSheet.create({
     width: 320,
     height: 320,
     borderRadius: 160,
-    backgroundColor: "#F9DDD0",
+    backgroundColor: highContrast ? "transparent" : "#F9DDD0",
     bottom: -100,
     right: -80,
   },
   loginCard: {
     width: "100%",
     maxWidth: 440,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: highContrast ? theme.cardBg : "#FFFFFF",
+    borderWidth: highContrast ? 2 : 0,
+    borderColor: highContrast ? theme.borderColor : "transparent",
     borderRadius: 24,
     paddingTop: 40,
     paddingBottom: 36,
     paddingHorizontal: 36,
-    shadowColor: "#6D4D3E",
+    shadowColor: highContrast ? "#000000" : "#6D4D3E",
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.1,
+    shadowOpacity: highContrast ? 0 : 0.1,
     shadowRadius: 25,
     elevation: 8,
     zIndex: 10,
   },
   title: {
-    color: "#3D261D",
+    color: highContrast ? theme.textPrimary : "#3D261D",
     fontSize: 28,
     fontWeight: "900",
     textAlign: "center",
@@ -628,31 +637,31 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   subtitle: {
-    color: "#8C7A70",
+    color: highContrast ? theme.textSecondary : "#8C7A70",
     fontSize: 13,
     lineHeight: 18,
     textAlign: "center",
     marginBottom: 28,
   },
-  label: { color: "#3D261D", fontSize: 13, fontWeight: "700", marginBottom: 8 },
+  label: { color: highContrast ? theme.textPrimary : "#3D261D", fontSize: 13, fontWeight: "700", marginBottom: 8 },
   input: {
     height: 50,
     borderWidth: 1,
-    borderColor: "#F0E3DA",
+    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
     borderRadius: 12,
-    backgroundColor: "#FFFBF8",
+    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
     paddingHorizontal: 16,
-    color: "#3D261D",
+    color: highContrast ? theme.textPrimary : "#3D261D",
     fontSize: 14,
     marginBottom: 20,
-    ...Platform.select({ web: { outlineStyle: "none" } }),
+    ...Platform.select({ web: { outlineStyle: "none" as any } }),
   },
   iconInputContainer: {
     height: 50,
     borderWidth: 1,
-    borderColor: "#F0E3DA",
+    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
     borderRadius: 12,
-    backgroundColor: "#FFFBF8",
+    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
@@ -662,17 +671,17 @@ const styles = StyleSheet.create({
   iconInput: {
     flex: 1,
     height: 48,
-    color: "#3D261D",
+    color: highContrast ? theme.textPrimary : "#3D261D",
     fontSize: 14,
     paddingVertical: 0,
-    ...Platform.select({ web: { outlineStyle: "none" } }),
+    ...Platform.select({ web: { outlineStyle: "none" as any } }),
   },
   passwordContainer: {
     height: 50,
     borderWidth: 1,
-    borderColor: "#F0E3DA",
+    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
     borderRadius: 12,
-    backgroundColor: "#FFFBF8",
+    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
@@ -682,35 +691,35 @@ const styles = StyleSheet.create({
   passwordInput: {
     flex: 1,
     height: 48,
-    color: "#3D261D",
+    color: highContrast ? theme.textPrimary : "#3D261D",
     fontSize: 14,
     paddingVertical: 0,
     paddingHorizontal: 0,
-    ...Platform.select({ web: { outlineStyle: "none" } }),
+    ...Platform.select({ web: { outlineStyle: "none" as any } }),
   },
   errorText: {
-    color: "#C53B2C",
+    color: highContrast ? "#B00020" : "#C53B2C",
     fontSize: 12,
     marginTop: -4,
     marginBottom: 12,
   },
   successText: {
-    color: "#3E8E5B",
+    color: highContrast ? "#006B2E" : "#3E8E5B",
     fontSize: 13,
     marginBottom: 16,
     lineHeight: 18,
     textAlign: "center",
   },
   forgotButton: { alignSelf: "flex-end", marginTop: 0, marginBottom: 24 },
-  forgotText: { color: "#E15743", fontSize: 13, fontWeight: "600" },
+  forgotText: { color: highContrast ? theme.accent : "#E15743", fontSize: 13, fontWeight: "600" },
   loginButton: {
     height: 52,
     borderRadius: 12,
-    backgroundColor: "#E15743",
+    backgroundColor: highContrast ? theme.accent : "#E15743",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 20,
-    shadowColor: "#E15743",
+    shadowColor: highContrast ? theme.accent : "#E15743",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,
@@ -721,12 +730,12 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E15743",
+    borderColor: highContrast ? theme.accent : "#E15743",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 4,
   },
-  secondaryButtonText: { color: "#E15743", fontSize: 16, fontWeight: "700" },
+  secondaryButtonText: { color: highContrast ? theme.accent : "#E15743", fontSize: 16, fontWeight: "700" },
   backButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -734,7 +743,7 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   backText: {
-    color: "#E15743",
+    color: highContrast ? theme.accent : "#E15743",
     fontSize: 13,
     fontWeight: "700",
     marginLeft: 6,
@@ -744,9 +753,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  registerText: { color: "#8C7A70", fontSize: 13 },
+  registerText: { color: highContrast ? theme.textSecondary : "#8C7A70", fontSize: 13 },
   registerLink: {
-    color: "#E15743",
+    color: highContrast ? theme.accent : "#E15743",
     fontSize: 13,
     fontWeight: "700",
     marginLeft: 6,

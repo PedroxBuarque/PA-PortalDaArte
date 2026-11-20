@@ -8,12 +8,20 @@ import {
 } from 'react-native';
 import { useAccessibility } from './AccessibilityContext';
 
-/** TextInput compatível com tamanho de fonte, espaçamento e leitores de tela. */
-export function AccessibleTextInput({ style, accessibilityLabel, placeholder, secureTextEntry, multiline, ...props }: TextInputProps) {
-  const { fontScale, readingSpacing } = useAccessibility();
+/** TextInput compatível com tamanho de fonte, espaçamento, alto contraste e leitores de tela. */
+export function AccessibleTextInput({
+  style,
+  accessibilityLabel,
+  placeholder,
+  placeholderTextColor,
+  secureTextEntry,
+  multiline,
+  ...props
+}: TextInputProps) {
+  const { fontScale, readingSpacing, highContrast } = useAccessibility();
 
   const scaledStyle = useMemo<TextStyle | undefined>(() => {
-    if (fontScale === 1 && !readingSpacing) return undefined;
+    if (fontScale === 1 && !readingSpacing && !highContrast) return undefined;
 
     const flat = StyleSheet.flatten(style) || {};
     const baseFontSize = typeof flat.fontSize === 'number' ? flat.fontSize : 14;
@@ -24,6 +32,14 @@ export function AccessibleTextInput({ style, accessibilityLabel, placeholder, se
       ...(readingSpacing
         ? { letterSpacing: Math.max(typeof flat.letterSpacing === 'number' ? flat.letterSpacing : 0, scaledFontSize * 0.04) }
         : null),
+      ...(highContrast
+        ? {
+            color: '#000000',
+            backgroundColor: '#FFFFFF',
+            borderColor: '#000000',
+            borderWidth: Math.max(typeof flat.borderWidth === 'number' ? flat.borderWidth : 0, 2),
+          }
+        : null),
     };
 
     if (multiline) {
@@ -32,7 +48,7 @@ export function AccessibleTextInput({ style, accessibilityLabel, placeholder, se
     }
     if (readingSpacing && Platform.OS === 'web') result.wordSpacing = scaledFontSize * 0.08;
     return result;
-  }, [fontScale, readingSpacing, style, multiline]);
+  }, [fontScale, readingSpacing, highContrast, style, multiline]);
 
   const fallbackLabel = useMemo(() => {
     if (accessibilityLabel) return accessibilityLabel;
@@ -47,6 +63,7 @@ export function AccessibleTextInput({ style, accessibilityLabel, placeholder, se
     <RNTextInput
       {...props}
       placeholder={placeholder}
+      placeholderTextColor={highContrast ? '#1F2937' : placeholderTextColor}
       secureTextEntry={secureTextEntry}
       multiline={multiline}
       accessibilityLabel={fallbackLabel}

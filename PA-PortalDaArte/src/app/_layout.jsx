@@ -1,3 +1,4 @@
+import 'react-native-gesture-handler';
 // app/_layout.jsx
 import { Slot } from 'expo-router';
 import VLibrasRoot from '../components/accessibility/VLibrasRoot';

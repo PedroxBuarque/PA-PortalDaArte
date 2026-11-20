@@ -18,6 +18,7 @@ export const REGISTER_ROUTE = "/pages/cadastro/cadastro";
 export const DISCOVER_ROUTE = "/pages/explorar/explorar";
 export const ARTIST_PROFILE_ROUTE = "/pages/perfil_publico/perfil_publico";
 export const FAVORITES_ROUTE = "/pages/favoritos/favoritos";
+export const SETTINGS_ROUTE = "/pages/configuracoes/configuracoes";
 
 const PUBLIC_ROUTES = new Set<string>([
   "/",
@@ -25,6 +26,7 @@ const PUBLIC_ROUTES = new Set<string>([
   DISCOVER_ROUTE,
   LOGIN_ROUTE,
   REGISTER_ROUTE,
+  SETTINGS_ROUTE,
 ]);
 
 /** Remove query/hash/.html/barra final e padroniza caixa, para comparar rotas com segurança. */

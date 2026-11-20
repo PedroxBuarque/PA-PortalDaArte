@@ -1,5 +1,6 @@
 // src/context/ThemeContext.js
 import React, { createContext, useState, useContext, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform, UIManager, LayoutAnimation } from 'react-native';
 import { useAccessibility } from '../accessibility/AccessibilityContext';
 
@@ -59,11 +60,24 @@ export const highContrastTheme = {
 };
 
 const ThemeContext = createContext();
+const THEME_STORAGE_KEY = '@portal_da_arte:theme_mode_v1';
 
 export const ThemeProvider = ({ children }) => {
   const { highContrast } = useAccessibility();
-  // Começa no modo claro (true) ou escuro (false)
-  const [isLightMode, setIsLightMode] = useState(true); 
+  // Começa no modo claro e restaura a preferência salva quando houver.
+  const [isLightMode, setIsLightMode] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(THEME_STORAGE_KEY)
+      .then((saved) => {
+        if (!active) return;
+        if (saved === 'light') setIsLightMode(true);
+        if (saved === 'dark') setIsLightMode(false);
+      })
+      .catch((error) => console.warn('[Tema] Não foi possível carregar a preferência:', error));
+    return () => { active = false; };
+  }, []);
 
   const toggleTheme = () => {
     // Configura a animação fluida para dispositivos móveis (Android/iOS)
@@ -82,7 +96,13 @@ export const ThemeProvider = ({ children }) => {
       },
     });
 
-    setIsLightMode((prev) => !prev);
+    setIsLightMode((prev) => {
+      const next = !prev;
+      void AsyncStorage.setItem(THEME_STORAGE_KEY, next ? 'light' : 'dark').catch((error) =>
+        console.warn('[Tema] Não foi possível salvar a preferência:', error)
+      );
+      return next;
+    });
   };
   
   // Variável que guarda o pacote de cores atual

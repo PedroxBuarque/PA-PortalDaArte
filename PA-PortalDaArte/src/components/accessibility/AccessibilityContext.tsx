@@ -29,7 +29,7 @@ type AccessibilityContextValue = AccessibilitySettings & {
   resetAccessibility: () => void;
 };
 
-// Mantemos a mesma chave da primeira versão para preservar as preferências já salvas.
+// Mantemos a mesma chave para preservar preferências salvas pelas versões anteriores.
 const STORAGE_KEY = '@portal_da_arte:accessibility_settings_v1';
 const DEFAULT_SETTINGS: AccessibilitySettings = {
   fontScale: 1,
@@ -43,10 +43,20 @@ function isFontScale(value: unknown): value is FontScale {
   return FONT_SCALE_OPTIONS.includes(value as FontScale);
 }
 
+function sanitizeSettings(value: unknown): AccessibilitySettings {
+  const parsed = value && typeof value === 'object'
+    ? (value as Partial<AccessibilitySettings>)
+    : {};
+
+  return {
+    fontScale: isFontScale(parsed.fontScale) ? parsed.fontScale : DEFAULT_SETTINGS.fontScale,
+    highContrast: typeof parsed.highContrast === 'boolean' ? parsed.highContrast : DEFAULT_SETTINGS.highContrast,
+    readingSpacing: typeof parsed.readingSpacing === 'boolean' ? parsed.readingSpacing : DEFAULT_SETTINGS.readingSpacing,
+  };
+}
+
 export function AccessibilityProvider({ children }: PropsWithChildren) {
-  const [fontScale, setFontScaleState] = useState<FontScale>(DEFAULT_SETTINGS.fontScale);
-  const [highContrast, setHighContrastState] = useState(DEFAULT_SETTINGS.highContrast);
-  const [readingSpacing, setReadingSpacingState] = useState(DEFAULT_SETTINGS.readingSpacing);
+  const [settings, setSettings] = useState<AccessibilitySettings>(DEFAULT_SETTINGS);
   const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
@@ -56,13 +66,11 @@ export function AccessibilityProvider({ children }: PropsWithChildren) {
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (!raw || !active) return;
-        const parsed = JSON.parse(raw) as Partial<AccessibilitySettings>;
-        if (isFontScale(parsed.fontScale)) setFontScaleState(parsed.fontScale);
-        if (typeof parsed.highContrast === 'boolean') setHighContrastState(parsed.highContrast);
-        if (typeof parsed.readingSpacing === 'boolean') setReadingSpacingState(parsed.readingSpacing);
+        if (!active) return;
+        setSettings(raw ? sanitizeSettings(JSON.parse(raw)) : DEFAULT_SETTINGS);
       } catch (error) {
         console.warn('[Acessibilidade] Não foi possível carregar as preferências:', error);
+        if (active) setSettings(DEFAULT_SETTINGS);
       } finally {
         if (active) setLoaded(true);
       }
@@ -75,6 +83,7 @@ export function AccessibilityProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     let active = true;
+
     AccessibilityInfo.isScreenReaderEnabled()
       .then((enabled) => {
         if (active) setScreenReaderEnabled(Boolean(enabled));
@@ -92,59 +101,73 @@ export function AccessibilityProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  const persist = useCallback(async (settings: AccessibilitySettings) => {
+  const persist = useCallback(async (next: AccessibilitySettings) => {
     try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     } catch (error) {
       console.warn('[Acessibilidade] Não foi possível salvar as preferências:', error);
     }
   }, []);
 
+  const updateSettings = useCallback(
+    (updater: (current: AccessibilitySettings) => AccessibilitySettings) => {
+      setSettings((current) => {
+        const next = sanitizeSettings(updater(current));
+        void persist(next);
+        return next;
+      });
+    },
+    [persist]
+  );
+
   const announce = useCallback((message: string) => {
-    if (!message.trim()) return;
-    AccessibilityInfo.announceForAccessibility(message);
+    const normalized = message.trim();
+    if (!normalized) return;
+    try {
+      AccessibilityInfo.announceForAccessibility(normalized);
+    } catch {
+      // Alguns runtimes web não implementam anúncio programático; nesse caso,
+      // accessibilityLiveRegion continua informando as mudanças de interface.
+    }
   }, []);
 
   const setFontScale = useCallback(
-    (scale: FontScale) => {
-      setFontScaleState(scale);
-      void persist({ fontScale: scale, highContrast, readingSpacing });
-      if (screenReaderEnabled) announce(`Tamanho da fonte alterado para ${Math.round(scale * 100)} por cento.`);
+    (fontScale: FontScale) => {
+      updateSettings((current) => ({ ...current, fontScale }));
+      if (screenReaderEnabled) {
+        announce(`Tamanho da fonte alterado para ${Math.round(fontScale * 100)} por cento.`);
+      }
     },
-    [highContrast, readingSpacing, screenReaderEnabled, persist, announce]
+    [announce, screenReaderEnabled, updateSettings]
   );
 
   const setHighContrast = useCallback(
-    (enabled: boolean) => {
-      setHighContrastState(enabled);
-      void persist({ fontScale, highContrast: enabled, readingSpacing });
-      if (screenReaderEnabled) announce(`Alto contraste ${enabled ? 'ativado' : 'desativado'}.`);
+    (highContrast: boolean) => {
+      updateSettings((current) => ({ ...current, highContrast }));
+      if (screenReaderEnabled) announce(`Alto contraste ${highContrast ? 'ativado' : 'desativado'}.`);
     },
-    [fontScale, readingSpacing, screenReaderEnabled, persist, announce]
+    [announce, screenReaderEnabled, updateSettings]
   );
 
   const setReadingSpacing = useCallback(
-    (enabled: boolean) => {
-      setReadingSpacingState(enabled);
-      void persist({ fontScale, highContrast, readingSpacing: enabled });
-      if (screenReaderEnabled) announce(`Espaçamento de leitura ampliado ${enabled ? 'ativado' : 'desativado'}.`);
+    (readingSpacing: boolean) => {
+      updateSettings((current) => ({ ...current, readingSpacing }));
+      if (screenReaderEnabled) {
+        announce(`Espaçamento de leitura ampliado ${readingSpacing ? 'ativado' : 'desativado'}.`);
+      }
     },
-    [fontScale, highContrast, screenReaderEnabled, persist, announce]
+    [announce, screenReaderEnabled, updateSettings]
   );
 
   const resetAccessibility = useCallback(() => {
-    setFontScaleState(DEFAULT_SETTINGS.fontScale);
-    setHighContrastState(DEFAULT_SETTINGS.highContrast);
-    setReadingSpacingState(DEFAULT_SETTINGS.readingSpacing);
+    setSettings(DEFAULT_SETTINGS);
     void persist(DEFAULT_SETTINGS);
     if (screenReaderEnabled) announce('Configurações de acessibilidade restauradas para o padrão.');
-  }, [screenReaderEnabled, persist, announce]);
+  }, [announce, persist, screenReaderEnabled]);
 
-  const value = useMemo(
+  const value = useMemo<AccessibilityContextValue>(
     () => ({
-      fontScale,
-      highContrast,
-      readingSpacing,
+      ...settings,
       loaded,
       screenReaderEnabled,
       setFontScale,
@@ -154,9 +177,7 @@ export function AccessibilityProvider({ children }: PropsWithChildren) {
       resetAccessibility,
     }),
     [
-      fontScale,
-      highContrast,
-      readingSpacing,
+      settings,
       loaded,
       screenReaderEnabled,
       setFontScale,
