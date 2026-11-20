@@ -25,6 +25,11 @@ export type PropostaApi = {
   contrato_id: number | null;
   contrato_status: ContratoStatus;
   papel_atual: 'contratante' | 'artista';
+  pode_responder?: boolean;
+  avaliacao_media?: number;
+  avaliacoes_total?: number;
+  contrato_data_inicio?: string | null;
+  contrato_data_conclusao?: string | null;
 };
 
 async function token() {
@@ -69,7 +74,9 @@ export async function responderProposta(id: string | number, acao: 'aceitar' | '
 }
 
 export function statusPropostaLabel(item: PropostaApi): string {
-  if (item.contrato_status === 'concluido') return 'Concluido';
+  if (item.contrato_status === 'concluido') return 'Concluído';
+  if (item.contrato_status === 'cancelado') return 'Cancelado';
+  if (item.contrato_status === 'em_disputa') return 'Em disputa';
   if (item.contrato_status === 'ativo' || item.status === 'aceita') return 'Confirmado';
   if (item.status === 'recusada') return 'Recusada';
   if (item.status === 'expirada') return 'Expirada';

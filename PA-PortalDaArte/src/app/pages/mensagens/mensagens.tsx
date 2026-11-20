@@ -19,6 +19,7 @@ import {
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { AppVideo } from '../../../components/media/AppVideo';
+import { formatarMoeda, responderProposta as responderPropostaApi, statusPropostaLabel, type PropostaApi } from '../../../services/contratacoes';
 
 // Importações dos Componentes e do Contexto
 import Sidebar from '../../../components/Sidebar';
@@ -67,7 +68,26 @@ type Mensagem = {
   criadoEm?: string | null;
   mediaUri?: string | null;
   mediaType?: 'image' | 'video' | null;
+  enviando?: boolean;
 };
+
+function normalizarMensagem(row: any): Mensagem {
+  return {
+    id: String(row.id),
+    fromMe: Boolean(row.fromMe),
+    text: String(row.text ?? row.conteudo ?? ''),
+    time: String(row.time || ''),
+    criadoEm: row.criado_em || row.created_at || row.createdAt || null,
+    mediaUri: row.media_url || null,
+    mediaType: row.media_type === 'video' ? 'video' : row.media_type === 'image' ? 'image' : null,
+  };
+}
+
+function mensagensIguais(a: Mensagem[], b: Mensagem[]): boolean {
+  return a.length === b.length && a.every((msg, i) =>
+    msg.id === b[i].id && msg.text === b[i].text && msg.enviando === b[i].enviando &&
+    msg.mediaType === b[i].mediaType && msg.mediaUri === b[i].mediaUri);
+}
 
 export default function MensagensScreen() {
   const router = useRouter();
@@ -77,13 +97,26 @@ export default function MensagensScreen() {
   const compactChat = viewportWidth < 760;
   const styles = getStyles(theme, compactChat, viewportWidth, viewportHeight) as any;
 
-  const params = useLocalSearchParams<{ destinatarioId?: string | string[]; destinatarioNome?: string | string[]; conversaId?: string | string[] }>();
+  const params = useLocalSearchParams<{ destinatarioId?: string | string[]; destinatarioNome?: string | string[]; conversaId?: string | string[]; contratar?: string | string[] }>();
   const destinatarioId = Array.isArray(params.destinatarioId) ? params.destinatarioId[0] : params.destinatarioId;
   const conversaIdParam = Array.isArray(params.conversaId) ? params.conversaId[0] : params.conversaId;
   const [conversations, setConversations] = useState<ConversaUI[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const sendingMessageRef = useRef(false);
+  const messageSequenceRef = useRef(0);
+  const selectedIdRef = useRef('');
+  const autoOpenProposalRef = useRef(false);
+  const [proposalVisible, setProposalVisible] = useState(false);
+  const [proposalDescription, setProposalDescription] = useState('');
+  const [proposalValue, setProposalValue] = useState('');
+  const [proposalPlace, setProposalPlace] = useState('');
+  const [sendingProposal, setSendingProposal] = useState(false);
+  const sendingProposalRef = useRef(false);
+  const [proposals, setProposals] = useState<PropostaApi[]>([]);
+  const [proposalError, setProposalError] = useState('');
+  const [respondendoPropostaId, setRespondendoPropostaId] = useState<number | null>(null);
   const [requestError, setRequestError] = useState('');
   const openedTargetRef = useRef<string | null>(null);
   const [messageText, setMessageText] = useState('');
@@ -99,7 +132,9 @@ export default function MensagensScreen() {
 
   const LIMITE_CARACTERES = 500;
 
+  selectedIdRef.current = selectedId;
   const selectedConversation = conversations.find((c) => c.id === selectedId);
+  const podeSolicitarContratacao = Boolean(selectedConversation?.podeContratar);
   const SelectedIcon = selectedConversation?.icon;
   const messages = messagesData[selectedId] || [];
 
@@ -133,7 +168,7 @@ export default function MensagensScreen() {
       outroUsuarioId: Number(item.outro_usuario_id),
       artistaId: Number(item.artista_id),
       contratanteId: Number(item.contratante_id),
-      podeContratar: Number(item.outro_usuario_id) === Number(item.artista_id),
+      podeContratar: typeof item.pode_solicitar === 'boolean' ? item.pode_solicitar : Number(item.outro_usuario_id) === Number(item.artista_id),
       fotoPerfil: item.foto_perfil || null,
     };
   };
@@ -184,40 +219,183 @@ export default function MensagensScreen() {
     return () => { active = false; };
   }, [destinatarioId, conversaIdParam]);
 
+  // A conversa permanece a mesma do backend; o polling apenas sincroniza
+  // alterações remotas, sem apagar mensagens otimistas ainda em trânsito.
   useEffect(() => {
     if (!selectedId) return;
     let active = true;
-    (async () => {
-      setLoadingMessages(true);
+    let inFlight = false;
+    const conversationId = selectedId;
+    const carregarMensagens = async (initial = false) => {
+      if (!active || inFlight) return;
+      inFlight = true;
+      if (initial) setLoadingMessages(true);
       try {
         const token = await getToken();
-        const response = await fetch(`${URL_API}/api/conversas/${selectedId}/mensagens`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const response = await fetch(`${URL_API}/api/conversas/${conversationId}/mensagens`, {
+          headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || 'Não foi possível carregar as mensagens.');
-        const rows = Array.isArray(payload) ? payload : (payload.mensagens || []);
-        if (active) setMessagesData((prev) => ({
-          ...prev,
-          [selectedId]: rows.map((row: any) => ({
-            id: String(row.id),
-            fromMe: Boolean(row.fromMe),
-            text: String(row.text ?? row.conteudo ?? ''),
-            time: String(row.time || ''),
-            criadoEm: row.criado_em || row.created_at || row.createdAt || null,
-            mediaUri: row.media_url || null,
-            mediaType: row.media_type === 'video' ? 'video' : row.media_type === 'image' ? 'image' : null,
-          })),
-        }));
-        if (active) setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, unread: 0 } : c));
+        const oficiais: Mensagem[] = (Array.isArray(payload) ? payload : (payload.mensagens || []))
+          .map(normalizarMensagem);
+        if (!active) return;
+        setMessagesData((prev) => {
+          const anteriores = prev[conversationId] || [];
+          const oficiaisComMidia = oficiais.map((m) => {
+            const anterior = anteriores.find((p) => p.id === m.id);
+            // Não refaz o carregamento de vídeo a cada URL assinada renovada.
+            return anterior?.mediaUri ? { ...m, mediaUri: anterior.mediaUri } : m;
+          });
+          const pendentes = anteriores.filter((m) => m.id.startsWith('temp-') && !oficiaisComMidia.some((oficial) => {
+            const dataPendente = new Date(m.criadoEm || '').getTime();
+            const dataOficial = new Date(oficial.criadoEm || '').getTime();
+            const recente = Number.isFinite(dataPendente) && Number.isFinite(dataOficial) &&
+              Math.abs(dataPendente - dataOficial) < 120000;
+            return oficial.fromMe && oficial.text === m.text && oficial.mediaType === m.mediaType && recente;
+          }));
+          const atualizadas = [...oficiaisComMidia, ...pendentes];
+          return mensagensIguais(anteriores, atualizadas) ? prev : { ...prev, [conversationId]: atualizadas };
+        });
+        setConversations((prev) => prev.map((c) => c.id === conversationId && c.unread !== 0 ? { ...c, unread: 0 } : c));
+        setRequestError('');
       } catch (error: any) {
-        if (active) setRequestError(error?.message || 'Erro ao carregar as mensagens.');
+        if (active && initial) setRequestError(error?.message || 'Erro ao carregar as mensagens.');
       } finally {
-        if (active) setLoadingMessages(false);
+        inFlight = false;
+        if (active && initial) setLoadingMessages(false);
       }
-    })();
-    return () => { active = false; };
+    };
+    void carregarMensagens(true);
+    const timer = setInterval(() => void carregarMensagens(), 3000);
+    return () => { active = false; clearInterval(timer); };
   }, [selectedId]);
+
+  // Atualiza lista, prévias e mensagens não lidas sem reiniciar a página.
+  useEffect(() => {
+    let active = true;
+    let inFlight = false;
+    const refreshConversations = async () => {
+      if (!active || inFlight) return;
+      inFlight = true;
+      try {
+        const token = await getToken();
+        const response = await fetch(`${URL_API}/api/conversas`, {
+          headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+        });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (!active) return;
+        const dados = (Array.isArray(payload) ? payload : (payload.conversas || [])).map(mapConversa);
+        setConversations(dados.map((c: ConversaUI) => c.id === selectedId ? { ...c, unread: 0 } : c));
+      } catch { /* O último histórico válido continua visível durante falhas transitórias. */ }
+      finally { inFlight = false; }
+    };
+    const timer = setInterval(() => void refreshConversations(), 12000);
+    return () => { active = false; clearInterval(timer); };
+  }, [selectedId]);
+
+  const carregarPropostas = async (conversationId: string) => {
+    const token = await getToken();
+    const response = await fetch(`${URL_API}/api/conversas/${conversationId}/propostas`, {
+      headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.detail || 'Não foi possível carregar as solicitações.');
+    if (selectedIdRef.current === conversationId) {
+      setProposals(Array.isArray(payload.propostas) ? payload.propostas : []);
+      setProposalError('');
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedId) { setProposals([]); setProposalError(''); return; }
+    let active = true;
+    let inFlight = false;
+    const conversationId = selectedId;
+    const atualizar = async () => {
+      if (!active || inFlight) return;
+      inFlight = true;
+      try {
+        const token = await getToken();
+        const response = await fetch(`${URL_API}/api/conversas/${conversationId}/propostas`, {
+          headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.detail || 'Erro ao consultar solicitações.');
+        if (active) {
+          setProposals(Array.isArray(payload.propostas) ? payload.propostas : []);
+          setProposalError('');
+        }
+      } catch (error: any) {
+        if (active) setProposalError(error?.message || 'Erro ao carregar solicitações.');
+      } finally { inFlight = false; }
+    };
+    setProposals([]);
+    void atualizar();
+    const timer = setInterval(() => void atualizar(), 3000);
+    return () => { active = false; clearInterval(timer); };
+  }, [selectedId]);
+
+  // Compatibilidade com links criados na versão anterior do perfil público.
+  useEffect(() => {
+    if (params.contratar === '1' && selectedId && podeSolicitarContratacao && !autoOpenProposalRef.current) {
+      autoOpenProposalRef.current = true;
+      setProposalVisible(true);
+    }
+  }, [params.contratar, selectedId, podeSolicitarContratacao]);
+
+  const enviarSolicitacao = async () => {
+    if (sendingProposalRef.current || !selectedId || !podeSolicitarContratacao) return;
+    const descricao = proposalDescription.trim();
+    const valor = Number(proposalValue.trim().replace(/\.(?=\d{3}(?:[,.]|$))/g, '').replace(',', '.'));
+    if (descricao.length < 10 || !Number.isFinite(valor) || valor <= 0 || valor >= 100000000) {
+      Alert.alert('Dados incompletos', 'Descreva o serviço (mínimo de 10 caracteres) e informe um valor válido.');
+      return;
+    }
+    sendingProposalRef.current = true;
+    setSendingProposal(true);
+    const conversationId = selectedId;
+    try {
+      const token = await getToken();
+      const response = await fetch(`${URL_API}/api/propostas`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversa_id: Number(conversationId),
+          descricao_escopo: descricao,
+          local_ou_modalidade: proposalPlace.trim() || null,
+          valor_proposto: valor,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.detail || 'Não foi possível enviar a solicitação.');
+      setProposalVisible(false);
+      setProposalDescription('');
+      setProposalValue('');
+      setProposalPlace('');
+      await carregarPropostas(conversationId);
+      // A solicitação também aparece na tela de Contratações via GET /api/propostas.
+    } catch (error: any) {
+      Alert.alert('Erro ao solicitar', error?.message || 'Não foi possível registrar a contratação.');
+    } finally {
+      sendingProposalRef.current = false;
+      setSendingProposal(false);
+    }
+  };
+
+  const responderSolicitacao = async (proposal: PropostaApi, acao: 'aceitar' | 'recusar') => {
+    if (respondendoPropostaId !== null || proposal.papel_atual !== 'artista' || proposal.status !== 'em_negociacao') return;
+    const conversationId = selectedId;
+    setRespondendoPropostaId(proposal.id);
+    try {
+      await responderPropostaApi(proposal.id, acao);
+      await carregarPropostas(conversationId);
+      // O endpoint do Vinicius cria o contrato ao aceitar; não criar outro aqui.
+    } catch (error: any) {
+      Alert.alert('Não foi possível responder', error?.message || 'Tente novamente.');
+    } finally { setRespondendoPropostaId(null); }
+  };
 
   const handleSelecionarMidia = async () => {
     try {
@@ -249,55 +427,68 @@ export default function MensagensScreen() {
 
   const handleSendMessage = async () => {
     const content = messageText.trim();
-    if (!selectedId || (!content && !midiaAnexada)) return;
+    if (!selectedId || sendingMessageRef.current || (!content && !midiaAnexada)) return;
+    sendingMessageRef.current = true;
+    const conversationId = selectedId;
+    const anexo = midiaAnexada;
+    const tempId = `temp-${Date.now()}-${++messageSequenceRef.current}`;
+    const otimista: Mensagem = {
+      id: tempId, fromMe: true, text: content, enviando: true,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      criadoEm: new Date().toISOString(), mediaUri: anexo?.uri || null,
+      mediaType: anexo?.type || null,
+    };
+    setMessageText('');
+    setMidiaAnexada(null);
+    setMessagesData((prev) => ({ ...prev, [conversationId]: [...(prev[conversationId] || []), otimista] }));
+    setConversations((prev) => prev.map((c) => c.id === conversationId ? {
+      ...c, lastMessage: content || (anexo?.type === 'video' ? '📎 Vídeo' : '📎 Imagem'), time: otimista.time,
+    } : c));
     try {
       const token = await getToken();
       let response: Response;
-      if (midiaAnexada) {
+      if (anexo) {
         const formData = new FormData();
         formData.append('conteudo', content);
-        if (Platform.OS === 'web' && midiaAnexada.file) {
-          formData.append('arquivo', midiaAnexada.file as any, midiaAnexada.name);
+        if (Platform.OS === 'web' && anexo.file) {
+          formData.append('arquivo', anexo.file as any, anexo.name);
         } else {
           formData.append('arquivo', {
-            uri: midiaAnexada.uri,
-            name: midiaAnexada.name,
-            type: midiaAnexada.mimeType,
+            uri: anexo.uri, name: anexo.name, type: anexo.mimeType,
           } as any);
         }
-        response = await fetch(`${URL_API}/api/conversas/${selectedId}/mensagens/arquivo`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
+        response = await fetch(`${URL_API}/api/conversas/${conversationId}/mensagens/arquivo`, {
+          method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData,
         });
       } else {
-        response = await fetch(`${URL_API}/api/conversas/${selectedId}/mensagens`, {
+        response = await fetch(`${URL_API}/api/conversas/${conversationId}/mensagens`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ conteudo: content }),
         });
       }
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail || 'Não foi possível enviar a mensagem.');
-      const row = payload.mensagem;
-      const novaMensagem: Mensagem = {
-        id: String(row.id),
-        fromMe: true,
-        text: String(row.text ?? row.conteudo ?? content),
-        time: String(row.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
-        criadoEm: row.criado_em || new Date().toISOString(),
-        mediaUri: row.media_url || null,
-        mediaType: row.media_type === 'video' ? 'video' : row.media_type === 'image' ? 'image' : null,
-      };
-      setMessagesData((prev) => ({ ...prev, [selectedId]: [...(prev[selectedId] || []), novaMensagem] }));
-      setTimeout(() => messagesScrollRef.current?.scrollToEnd({ animated: true }), 100);
-      const preview = content || (novaMensagem.mediaType === 'video' ? '📎 Vídeo' : '📎 Imagem');
-      setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, lastMessage: preview, time: novaMensagem.time } : c));
-      setMessageText('');
-      setMidiaAnexada(null);
+      if (!response.ok || !payload?.mensagem?.id) throw new Error(payload?.detail || 'Não foi possível enviar a mensagem.');
+      const confirmada = normalizarMensagem(payload.mensagem);
+      setMessagesData((prev) => {
+        const existentes = (prev[conversationId] || []).filter((m) => m.id !== tempId && m.id !== confirmada.id);
+        return { ...prev, [conversationId]: [...existentes, confirmada] };
+      });
+      setConversations((prev) => prev.map((c) => c.id === conversationId ? {
+        ...c, lastMessage: content || (confirmada.mediaType === 'video' ? '📎 Vídeo' : '📎 Imagem'),
+        time: confirmada.time,
+      } : c));
       setRequestError('');
+      setTimeout(() => messagesScrollRef.current?.scrollToEnd({ animated: true }), 100);
     } catch (error: any) {
+      setMessagesData((prev) => ({ ...prev,
+        [conversationId]: (prev[conversationId] || []).filter((m) => m.id !== tempId),
+      }));
+      setMessageText((atual) => atual || content);
+      if (anexo) setMidiaAnexada((atual) => atual || anexo);
       Alert.alert('Erro ao enviar', error?.message || 'Não foi possível enviar a mensagem.');
+    } finally {
+      sendingMessageRef.current = false;
     }
   };
 
@@ -339,6 +530,44 @@ export default function MensagensScreen() {
         barStyle={theme.statusBarStyle || (isLightMode ? 'dark-content' : 'light-content')}
         backgroundColor={theme.headerBg}
       />
+      <Modal visible={proposalVisible && podeSolicitarContratacao} transparent animationType="fade"
+        onRequestClose={() => setProposalVisible(false)}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.overlay || '#0009', padding: 16 }}>
+          <View style={{ width: '100%', maxWidth: 470, backgroundColor: theme.cardBg, borderRadius: 22,
+            borderColor: theme.borderColor, borderWidth: 1, padding: 22, gap: 12 }}>
+            <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: '900' }}>Solicitar contratação</Text>
+            <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+              A solicitação será registrada em Contratações e vinculada a esta conversa.
+            </Text>
+            <TextInput multiline value={proposalDescription} onChangeText={setProposalDescription}
+              placeholder="Descreva o serviço desejado (mínimo de 10 caracteres)" placeholderTextColor={theme.textSecondary}
+              maxLength={5000} textAlignVertical="top" accessibilityLabel="Descrição do serviço"
+              style={{ minHeight: 100, borderWidth: 1, borderRadius: 12, borderColor: theme.borderColor,
+                backgroundColor: theme.mainBg, padding: 12, color: theme.textPrimary }} />
+            <TextInput value={proposalValue} onChangeText={setProposalValue} keyboardType="decimal-pad"
+              placeholder="Valor proposto (R$)" placeholderTextColor={theme.textSecondary}
+              accessibilityLabel="Valor da proposta em reais"
+              style={{ borderWidth: 1, borderRadius: 12, borderColor: theme.borderColor,
+                backgroundColor: theme.mainBg, padding: 12, color: theme.textPrimary }} />
+            <TextInput value={proposalPlace} onChangeText={setProposalPlace}
+              placeholder="Cidade/UF ou modalidade (opcional)" placeholderTextColor={theme.textSecondary}
+              maxLength={255} accessibilityLabel="Local ou modalidade do evento"
+              style={{ borderWidth: 1, borderRadius: 12, borderColor: theme.borderColor,
+                backgroundColor: theme.mainBg, padding: 12, color: theme.textPrimary }} />
+            <TouchableOpacity onPress={() => void enviarSolicitacao()} disabled={sendingProposal}
+              style={{ backgroundColor: theme.accent, paddingVertical: 14, borderRadius: 12, opacity: sendingProposal ? .65 : 1 }}
+              accessibilityRole="button" accessibilityLabel="Enviar solicitação de contratação">
+              <Text style={{ color: theme.onAccent || '#fff', fontWeight: '800', textAlign: 'center' }}>
+                {sendingProposal ? 'Enviando...' : 'Enviar solicitação'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setProposalVisible(false)} disabled={sendingProposal}
+              style={{ padding: 8 }} accessibilityRole="button">
+              <Text style={{ color: theme.textSecondary, fontWeight: '700', textAlign: 'center' }}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       <View style={styles.dashboardContainer}>
         {!compactShell ? <Sidebar /> : null}
 
@@ -446,8 +675,8 @@ export default function MensagensScreen() {
                         {selectedConversation.fotoPerfil ? <Image source={{ uri: selectedConversation.fotoPerfil }} style={styles.chatAvatarImage}
                           accessible={false} /> : <SelectedIcon size={18} color={selectedConversation.iconColor} />}
                       </View>
-                      <View>
-                        <Text style={styles.chatHeaderName}>{selectedConversation.name}</Text>
+                      <View style={{ flexShrink: 1, minWidth: 0 }}>
+                        <Text style={styles.chatHeaderName} numberOfLines={1}>{selectedConversation.name}</Text>
                         <View style={styles.statusRow}>
                           <View style={styles.statusDot} />
                           <Text style={styles.statusText}>{selectedConversation.status}</Text>
@@ -455,19 +684,71 @@ export default function MensagensScreen() {
                       </View>
                     </View>
 
-                    {selectedConversation.podeContratar ? (
-                      <TouchableOpacity
-                        style={styles.btnConfirm}
-                        activeOpacity={0.85}
-                        onPress={() => router.push({ pathname: '/pages/contratacoes/Contratar', params: { id: String(selectedConversation.artistaId) } } as any)}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Contratar ${selectedConversation.name}`}
-                      >
-                        <Text style={styles.btnConfirmText}>Confirmar Contratação</Text>
-                      </TouchableOpacity>
+                    {podeSolicitarContratacao ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1, flexWrap: 'wrap' }}>
+                        <TouchableOpacity style={styles.btnConfirm} activeOpacity={0.85}
+                          onPress={() => setProposalVisible(true)} accessibilityRole="button"
+                          accessibilityLabel={`Solicitar contratação de ${selectedConversation.name}`}>
+                          <Text style={styles.btnConfirmText}>Solicitar contratação</Text>
+                        </TouchableOpacity>
+                        {viewportWidth >= 1320 ? (
+                          <TouchableOpacity onPress={() => router.push({ pathname: '/pages/contratacoes/Contratar',
+                              params: { id: String(selectedConversation.artistaId) } } as any)}
+                            accessibilityRole="button" accessibilityLabel="Abrir formulário completo de contratação"
+                            style={{ paddingVertical: 10, paddingHorizontal: 8 }}>
+                            <Text style={{ color: theme.accent, fontWeight: '700', fontSize: 12 }}>Formulário completo</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
                     ) : null}
                   </View>
 
+                  {(proposals.length > 0 || proposalError) ? (
+                    <ScrollView style={{ flexGrow: 0, maxHeight: Math.min(225, Math.max(110, viewportHeight * 0.25)), borderBottomWidth: 1, borderBottomColor: theme.borderColor }}
+                      contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 10, gap: 8 }}
+                      nestedScrollEnabled>
+                      {proposalError ? <Text style={{ color: theme.danger || '#B42318', fontSize: 12 }}>{proposalError}</Text> : null}
+                      {proposals.map((proposta) => {
+                        const pendente = proposta.status === 'em_negociacao';
+                        return (
+                          <View key={proposta.id} style={{ backgroundColor: theme.cardBg,
+                            borderWidth: 1, borderColor: theme.borderColor, borderLeftWidth: 4,
+                            borderLeftColor: theme.accent, borderRadius: 14, padding: 12, gap: 5 }}>
+                            <Text style={{ color: theme.textPrimary, fontWeight: '900', fontSize: 13 }}>
+                              Solicitação de contratação #{proposta.id}
+                            </Text>
+                            <Text style={{ color: theme.textPrimary, fontSize: 12 }} numberOfLines={2}>
+                              {proposta.descricao_escopo}
+                            </Text>
+                            <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                              {formatarMoeda(proposta.valor_proposto)} · {statusPropostaLabel(proposta)}
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                              <TouchableOpacity onPress={() => router.push({ pathname: '/pages/contratacoes/detalhes',
+                                  params: { id: String(proposta.id) } })} accessibilityRole="button"
+                                style={{ paddingVertical: 4 }}>
+                                <Text style={{ color: theme.accent, fontWeight: '800', fontSize: 12 }}>Ver em Contratações</Text>
+                              </TouchableOpacity>
+                              {pendente && proposta.papel_atual === 'artista' && proposta.pode_responder ? (
+                                <>
+                                  <TouchableOpacity disabled={respondendoPropostaId !== null}
+                                    onPress={() => void responderSolicitacao(proposta, 'aceitar')} accessibilityRole="button">
+                                    <Text style={{ color: theme.success || '#16794B', fontWeight: '800', fontSize: 12 }}>
+                                      {respondendoPropostaId === proposta.id ? 'Salvando...' : 'Aceitar'}
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity disabled={respondendoPropostaId !== null}
+                                    onPress={() => void responderSolicitacao(proposta, 'recusar')} accessibilityRole="button">
+                                    <Text style={{ color: theme.danger || '#B42318', fontWeight: '800', fontSize: 12 }}>Recusar</Text>
+                                  </TouchableOpacity>
+                                </>
+                              ) : null}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                  ) : null}
                   <ScrollView
                     ref={messagesScrollRef}
                     style={styles.messagesScroll}
@@ -610,7 +891,7 @@ export default function MensagensScreen() {
                               </Text>
                             ) : null}
                           </View>
-                          <Text style={styles.bubbleTime}>{msg.time}</Text>
+                          <Text style={styles.bubbleTime}>{msg.enviando ? 'Enviando...' : msg.time}</Text>
                         </View>
                         </React.Fragment>
                       );

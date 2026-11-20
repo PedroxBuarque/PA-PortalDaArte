@@ -16,6 +16,9 @@ export type Contratacao = {
   id: string;
   name: string;
   category: string;
+  title?: string;
+  value?: string;
+  rating?: string;
   date: string;
   location: string;
   status: string;
@@ -37,8 +40,11 @@ function getStatusColor(status: string) {
     case 'Confirmado':
       return '#176B87';
     case 'Concluido':
+    case 'Concluído':
       return '#16794B';
     case 'Recusada':
+    case 'Recusado':
+    case 'Cancelado':
       return '#B42318';
     case 'Expirada':
       return '#5D6470';
@@ -114,6 +120,10 @@ export default function CardContratacao({ item, onPress }: Props) {
       fontWeight: '800',
       letterSpacing: 0.5,
     },
+    titleText: { fontSize: compact ? 15 : 16, fontWeight: '800', color: theme.textPrimary,
+      marginTop: 4, lineHeight: 22 },
+    valueText: { color: theme.textPrimary, fontWeight: '900', fontSize: 17 },
+    ratingText: { color: theme.textSecondary, fontSize: 12, marginTop: 4 },
     infoText: {
       fontSize: 12,
       color: theme.textSecondary,
@@ -180,6 +190,7 @@ export default function CardContratacao({ item, onPress }: Props) {
             </Text>
           </View>
 
+          {item.title ? <Text style={styles.titleText} numberOfLines={2}>{item.title}</Text> : null}
           <Text style={styles.infoText}>
             {item.date}
           </Text>
@@ -187,10 +198,12 @@ export default function CardContratacao({ item, onPress }: Props) {
           <Text style={styles.infoText}>
             {item.location}
           </Text>
+          {item.rating ? <Text style={styles.ratingText}>{item.rating}</Text> : null}
         </View>
       </View>
 
       <View style={styles.cardRightGroup}>
+        {item.value ? <Text style={styles.valueText}>{item.value}</Text> : null}
         <View style={styles.statusBadge}>
           <Text style={styles.statusText}>
             {item.status}

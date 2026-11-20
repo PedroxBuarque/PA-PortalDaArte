@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
+  Pressable,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -19,19 +20,32 @@ import { useTheme } from '../../../components/context/ThemeContext';
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
 import {
   formatarDataProposta,
+  formatarMoeda,
   listarPropostas,
   statusPropostaLabel,
   type PropostaApi,
 } from '../../../services/contratacoes';
 
+type Filtro = 'Todas' | 'Pendente' | 'Confirmado' | 'Concluído' | 'Recusada' | 'Expirada';
+const FILTROS: Filtro[] = ['Todas', 'Pendente', 'Confirmado', 'Concluído', 'Recusada', 'Expirada'];
+
 function toCard(item: PropostaApi): Contratacao {
-  const nome = item.papel_atual === 'contratante' ? item.artista_nome : item.contratante_nome;
-  const papel = item.papel_atual === 'contratante' ? item.servico_titulo : `Solicitação de ${item.contratante_nome}`;
+  const nome = item.artista_nome;
+  const category = item.papel_atual === 'artista'
+    ? `Solicitado por ${item.contratante_nome}` : 'Artista';
+  const rating = (item.avaliacoes_total || 0) > 0 && Number.isFinite(Number(item.avaliacao_media))
+    ? `★ ${Number(item.avaliacao_media).toFixed(1).replace('.', ',')} / 5 (${item.avaliacoes_total} avaliações)`
+    : 'Sem avaliações registradas';
   return {
     id: String(item.id),
     name: nome,
-    category: papel,
-    date: `Prazo: ${formatarDataProposta(item.prazo_estimado)}`,
+    category,
+    title: item.servico_titulo || item.descricao_escopo,
+    value: formatarMoeda(item.valor_proposto),
+    rating,
+    date: item.prazo_estimado
+      ? `Prazo previsto: ${formatarDataProposta(item.prazo_estimado)}`
+      : `Solicitado em: ${formatarDataProposta(item.criado_em)}`,
     location: item.local_ou_modalidade || 'Local a combinar',
     status: statusPropostaLabel(item),
     icon: Music,
@@ -48,26 +62,33 @@ export default function ContratacoesScreen() {
   const compact = width < 900;
   const styles = getStyles(theme, compact);
   const [items, setItems] = useState<PropostaApi[]>([]);
+  const [filtro, setFiltro] = useState<Filtro>('Todas');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const carregar = useCallback(async () => {
-    setLoading(true);
-    setError('');
+  const carregar = useCallback(async (initial = false) => {
+    if (initial) { setLoading(true); setError(''); }
     try {
       setItems(await listarPropostas());
+      setError('');
     } catch (err: any) {
       setError(err?.message || 'Não foi possível carregar as contratações.');
     } finally {
-      setLoading(false);
+      if (initial) setLoading(false);
     }
   }, []);
 
+  // Ao regressar do chat os dados são recarregados; com a tela aberta,
+  // o status acompanha o backend automaticamente sem animação de loading.
   useFocusEffect(
     useCallback(() => {
-      void carregar();
+      let active = true;
+      void carregar(true);
+      const timer = setInterval(() => { if (active) void carregar(); }, 4000);
+      return () => { active = false; clearInterval(timer); };
     }, [carregar])
   );
+  const exibidos = items.filter((item) => filtro === 'Todas' || statusPropostaLabel(item) === filtro);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -97,6 +118,21 @@ export default function ContratacoesScreen() {
                 </View>
               </View>
 
+              <View style={styles.filters} accessibilityLabel="Filtros de contratações">
+                {FILTROS.map((f) => (
+                  <Pressable key={f} accessibilityRole="button" accessibilityState={{ selected: filtro === f }}
+                    onPress={() => setFiltro(f)}
+                    style={[styles.filter, { backgroundColor: filtro === f ? theme.accent : theme.cardBg,
+                      borderColor: filtro === f ? theme.accent : theme.borderColor }]}>
+                    <Text style={{ color: filtro === f ? (theme.onAccent || '#FFFFFF') : theme.textPrimary, fontWeight: '800', fontSize: 12 }}>
+                      {f}
+                    </Text>
+                  </Pressable>
+                ))}
+                <Pressable onPress={() => void carregar(true)} accessibilityRole="button" style={styles.refresh}>
+                  <Text style={{ color: theme.accent, fontWeight: '800', fontSize: 12 }}>Atualizar</Text>
+                </Pressable>
+              </View>
               {loading ? (
                 <View style={styles.stateBox} accessibilityLiveRegion="polite">
                   <ActivityIndicator color={theme.accent} />
@@ -109,14 +145,14 @@ export default function ContratacoesScreen() {
                     Tentar novamente
                   </Text>
                 </View>
-              ) : items.length === 0 ? (
+              ) : exibidos.length === 0 ? (
                 <View style={styles.stateBox}>
-                  <Text style={styles.emptyTitle}>Nenhuma contratação ainda</Text>
-                  <Text style={styles.stateText}>Abra o perfil de um artista e toque em Contratar para iniciar.</Text>
+                  <Text style={styles.emptyTitle}>Nenhuma contratação neste filtro</Text>
+                  <Text style={styles.stateText}>Consulte outro status ou solicite um serviço pelo perfil de um artista.</Text>
                 </View>
               ) : (
                 <View style={styles.cardsContainer}>
-                  {items.map((item) => {
+                  {exibidos.map((item) => {
                     const card = toCard(item);
                     return (
                       <CardContratacao
@@ -165,6 +201,9 @@ const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
   pageEyebrow: { color: theme.artGold || theme.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1.5, marginBottom: 4 },
   pageTitle: { fontSize: compact ? 24 : 29, lineHeight: compact ? 29 : 34, fontWeight: '900' as any, color: theme.heroText || '#FFFFFF', fontFamily: 'serif', letterSpacing: -0.5 },
   pageSubtitle: { color: theme.heroMuted || '#E6D8CF', fontSize: 12.5, lineHeight: 18, marginTop: 6 },
+  filters: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 20 },
+  filter: { paddingHorizontal: 15, paddingVertical: 9, borderRadius: 18, borderWidth: 1 },
+  refresh: { paddingHorizontal: 12, paddingVertical: 9 },
   cardsContainer: { gap: 14, paddingBottom: 8 },
   stateBox: {
     backgroundColor: theme.cardBg,
