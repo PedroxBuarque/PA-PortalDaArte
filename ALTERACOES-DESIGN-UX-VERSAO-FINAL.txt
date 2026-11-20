@@ -1,0 +1,58 @@
+PORTAL DA ARTE - REFINAMENTO FINAL DE DESIGN, UX E ACESSIBILIDADE
+Data: 20/11/2026
+
+IDENTIDADE VISUAL
+- Preservada a identidade creme, laranja e marrom do Portal da Arte.
+- Paletas claro, escuro e alto contraste reorganizadas com tokens consistentes.
+- Contraste de textos, bordas, botoes e superficies reforcado.
+- Cartoes, sombras, bordas, raios e espacamentos padronizados.
+- Estados de foco por teclado mais visiveis no Web.
+
+NAVEGACAO E RESPONSIVIDADE
+- Sidebar desktop refinada e simplificada.
+- Menu lateral movel adicionado ao Header para usuarios autenticados.
+- Header reorganizado em telas pequenas, com busca em segunda linha.
+- Breakpoint de 900 px aplicado de forma consistente para Sidebar/Header.
+- Descobrir passa de 3 para 2 e 1 coluna conforme a largura disponivel.
+- Filtros de Descobrir passam para modal quando nao ha espaco suficiente.
+- Favoritos, Contratacoes, Detalhes, Contratar, Mensagens, Perfil, Perfil Publico e Configuracoes refinados para celular/tablet.
+- Conversas no celular usam fluxo lista -> conversa com botao de voltar, evitando duas colunas comprimidas.
+
+ACESSIBILIDADE
+- Configuracoes/Acessibilidade continua disponivel antes do login.
+- Escala de fonte: 100%, 125%, 150%, 175% e 200%.
+- Alto contraste em todo o fluxo, inclusive Login e Cadastro.
+- Espacamento ampliado com entrelinha, letras e, no Web, palavras.
+- Preferencias persistidas no dispositivo.
+- VLibras mantido para Web/Android/iOS.
+- Leitores de tela: rotulos, papeis, estados e elementos decorativos revisados.
+- Foco visivel por teclado no Web.
+- prefers-reduced-motion respeitado automaticamente no Web.
+
+FLUXO PUBLICO
+- Descobrir continua publico.
+- Perfil publico do artista agora e realmente publico.
+- Favoritar, enviar mensagem e contratar continuam exigindo login e preservam o destino para retomar apos autenticacao.
+
+LOGIN E CADASTRO
+- Redesenho visual para seguir os temas claro, escuro e alto contraste.
+- Formulario de cadastro empilha os campos em telas estreitas.
+- Cartoes, inputs, modais e botoes seguem o mesmo sistema visual do restante do app.
+
+MIDIA
+- Migracao de expo-av para expo-video.
+- Novo componente compartilhado AppVideo para Web/Android/iOS.
+- Mantidos controles nativos, autoplay em visualizadores e previa silenciosa de video em mensagens.
+- expo-av removido das dependencias do projeto.
+
+QUALIDADE TECNICA
+- TypeScript sem erros.
+- Dependencias compativeis com Expo SDK 54 segundo o mapa local do Expo.
+- Export Web concluido com 16 rotas.
+- Export Android concluido com bundle Hermes.
+- Export iOS concluido com bundle Hermes.
+- Backend validado por py_compile.
+- Nenhum TODO/FIXME ou aviso de funcionalidade simulada encontrado nos fluxos revisados.
+
+OBSERVACAO
+Os testes que dependem de MySQL, Supabase, SMTP e demais servicos externos precisam ser executados no ambiente do projeto com os .env reais, pois credenciais nao sao incluidas no pacote final.

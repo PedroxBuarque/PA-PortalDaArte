@@ -1,5 +1,6 @@
 import React, { useMemo, useRef } from 'react';
 import {
+  Platform,
   StyleSheet,
   Text as RNText,
   type TextProps,
@@ -27,13 +28,19 @@ function accessibilityTextStyle(style: TextProps['style'], fontScale: number, re
   const baseLineHeight = typeof flat.lineHeight === 'number' ? flat.lineHeight : baseFontSize * 1.25;
   const scaledLineHeight = baseLineHeight * fontScale;
 
-  return {
+  const result: TextStyle & { wordSpacing?: number } = {
     ...(fontScale !== 1 ? { fontSize: scaledFontSize } : null),
     lineHeight: readingSpacing ? Math.max(scaledLineHeight, scaledFontSize * 1.6) : scaledLineHeight,
     ...(readingSpacing
       ? { letterSpacing: Math.max(typeof flat.letterSpacing === 'number' ? flat.letterSpacing : 0, scaledFontSize * 0.04) }
       : null),
   };
+
+  if (readingSpacing && Platform.OS === 'web') {
+    result.wordSpacing = scaledFontSize * 0.08;
+  }
+
+  return result;
 }
 
 /**

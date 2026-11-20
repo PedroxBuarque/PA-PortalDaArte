@@ -9,6 +9,7 @@ import {
   StatusBar,
   StyleSheet,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { ArrowLeft, CalendarDays, MapPin, Music, UserRound, Wallet } from 'lucide-react-native';
@@ -32,7 +33,10 @@ export default function DetalhesContratacaoScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const { theme, isLightMode } = useTheme();
-  const styles = getStyles(theme);
+  const { width } = useWindowDimensions();
+  const compact = width < 900;
+  const narrow = width < 620;
+  const styles = getStyles(theme, compact, narrow);
   const [item, setItem] = useState<PropostaApi | null>(null);
   const [loading, setLoading] = useState(true);
   const [respondendo, setRespondendo] = useState(false);
@@ -90,11 +94,11 @@ export default function DetalhesContratacaoScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar
-        barStyle={isLightMode ? 'dark-content' : 'light-content'}
+        barStyle={theme.statusBarStyle || (isLightMode ? 'dark-content' : 'light-content')}
         backgroundColor={theme.headerBg}
       />
       <View style={styles.dashboardContainer}>
-        <Sidebar />
+        {!compact ? <Sidebar /> : null}
         <View style={styles.mainContent}>
           <Header />
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
@@ -104,7 +108,11 @@ export default function DetalhesContratacaoScreen() {
                 <Text style={styles.backButtonText}>Voltar para Contratações</Text>
               </Pressable>
 
-              <Text style={styles.title} accessibilityRole="header">Detalhes da contratação</Text>
+              <View style={styles.titleHero}>
+                <Text style={styles.titleEyebrow}>ACOMPANHAMENTO DO PROJETO</Text>
+                <Text style={styles.title} accessibilityRole="header">Detalhes da contratação</Text>
+                <Text style={styles.titleSubtitle}>Veja escopo, prazo, valor e andamento da proposta.</Text>
+              </View>
 
               {loading ? (
                 <View style={styles.stateBox} accessibilityLiveRegion="polite">
@@ -205,39 +213,42 @@ export default function DetalhesContratacaoScreen() {
   );
 }
 
-const getStyles = (theme: any) => StyleSheet.create({
+const getStyles = (theme: any, compact: boolean, narrow: boolean) => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.mainBg, ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }) },
   dashboardContainer: { flex: 1, flexDirection: 'row', backgroundColor: theme.mainBg },
   mainContent: { flex: 1, backgroundColor: theme.mainBg, ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }) },
   scrollView: { flex: 1 },
   scrollContent: { flexGrow: 1 },
-  contentWrapper: { paddingHorizontal: 32, paddingTop: 20, paddingBottom: 32 },
+  contentWrapper: { width: '100%', maxWidth: 980, alignSelf: 'center', paddingHorizontal: compact ? 18 : 32, paddingTop: compact ? 18 : 26, paddingBottom: 36 },
   backButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 8, marginBottom: 24, paddingVertical: 8 },
   backButtonText: { color: theme.textPrimary, fontSize: 14, fontWeight: '600' },
-  title: { fontSize: 28, fontWeight: '700', color: theme.textPrimary, marginBottom: 24 },
+  titleHero: { backgroundColor: theme.heroBg || theme.textPrimary, borderRadius: 24, padding: compact ? 18 : 24, marginBottom: 22, overflow: 'hidden', ...Platform.select({ web: { boxShadow: `0 16px 38px ${theme.shadowStrong || theme.shadowColor}` } }) },
+  titleEyebrow: { color: theme.artGold || theme.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1.5, marginBottom: 5 },
+  title: { fontSize: compact ? 25 : 31, lineHeight: compact ? 30 : 36, fontWeight: '900' as any, color: theme.heroText || '#FFFFFF', fontFamily: 'serif', letterSpacing: -0.5 },
+  titleSubtitle: { color: theme.heroMuted || '#E6D8CF', fontSize: 12.5, lineHeight: 18, marginTop: 7 },
   stateBox: { backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 16, padding: 30, alignItems: 'center', gap: 10 },
   stateText: { color: theme.textSecondary },
   errorText: { color: '#B42318', fontWeight: '600', textAlign: 'center' },
   retryText: { color: theme.accent, fontWeight: '700' },
-  detailsCard: { backgroundColor: theme.cardBg, borderRadius: 16, borderWidth: 1, borderColor: theme.borderColor, padding: 24 },
-  artistHeader: { flexDirection: 'row', alignItems: 'center' },
-  avatar: { width: 58, height: 58, borderRadius: 29, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.menuActiveBg, marginRight: 16 },
+  detailsCard: { backgroundColor: theme.cardBg, borderRadius: 24, borderWidth: 1, borderColor: theme.borderColor, borderLeftWidth: 4, borderLeftColor: theme.accent, padding: narrow ? 18 : 26, ...Platform.select({ web: { boxShadow: `0 10px 30px ${theme.shadowColor || 'rgba(0,0,0,0.06)'}` } }) },
+  artistHeader: { flexDirection: narrow ? 'column' : 'row', alignItems: narrow ? 'flex-start' : 'center', gap: narrow ? 12 : 0 },
+  avatar: { width: 62, height: 62, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.menuActiveBg, marginRight: 16 },
   artistInfo: { flex: 1, minWidth: 0 },
-  artistName: { fontSize: 19, fontWeight: '700', color: theme.textPrimary },
+  artistName: { fontSize: 21, fontWeight: '900', color: theme.textPrimary, fontFamily: 'serif' },
   category: { fontSize: 13, color: theme.textSecondary, marginTop: 4 },
-  statusBadge: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 18, marginLeft: 12 },
+  statusBadge: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 18, marginLeft: narrow ? 0 : 12 },
   statusText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   separator: { height: 1, backgroundColor: theme.borderColor, marginVertical: 22 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: theme.textPrimary, marginBottom: 18 },
+  sectionTitle: { fontSize: 18, fontWeight: '900', color: theme.textPrimary, fontFamily: 'serif', marginBottom: 18 },
   infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 18 },
   infoContent: { flex: 1 },
   label: { color: theme.textSecondary, fontSize: 12, fontWeight: '600' },
   value: { color: theme.textPrimary, fontSize: 14, fontWeight: '600', marginTop: 3 },
-  scopeBox: { backgroundColor: theme.mainBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 12, padding: 16, marginTop: 4 },
+  scopeBox: { backgroundColor: theme.surfaceMuted || theme.mainBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 18, padding: 16, marginTop: 4 },
   scopeText: { color: theme.textPrimary, fontSize: 13, lineHeight: 20, marginTop: 6 },
   contractText: { color: theme.accent, fontSize: 12, fontWeight: '700', marginTop: 16 },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 22 },
-  actionButton: { borderRadius: 10, paddingHorizontal: 18, paddingVertical: 12, borderWidth: 1 },
+  actions: { flexDirection: narrow ? 'column-reverse' : 'row', justifyContent: 'flex-end', gap: 10, marginTop: 24 },
+  actionButton: { borderRadius: 12, minHeight: 46, paddingHorizontal: 18, paddingVertical: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   rejectButton: { backgroundColor: theme.cardBg, borderColor: '#C0392B' },
   acceptButton: { backgroundColor: theme.accent, borderColor: theme.accent },
   rejectText: { color: '#C0392B', fontWeight: '700' },

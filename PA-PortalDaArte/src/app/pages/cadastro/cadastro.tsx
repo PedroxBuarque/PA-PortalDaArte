@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { AccessibleTextInput as TextInput } from '../../../components/accessibility/AccessibleTextInput';
 import { router, useLocalSearchParams } from "expo-router";
 import { Lock } from "lucide-react-native";
 import { buildLoginHref, sanitizeRedirect } from "../../../constants/auth-routes";
+import BrandMark from "../../../components/BrandMark";
 
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
 import { useAccessibility } from '../../../components/accessibility/AccessibilityContext';
@@ -14,7 +15,9 @@ const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 export default function RegisterScreen() {
   const { theme } = useTheme();
   const { highContrast } = useAccessibility();
-  const styles = getStyles(theme, highContrast);
+  const { width } = useWindowDimensions();
+  const compact = width < 620;
+  const styles = getStyles(theme, highContrast, compact);
 
   // O cadastro não faz login automático: o destino pretendido segue junto até o login.
   const params = useLocalSearchParams<{ redirect?: string | string[] }>();
@@ -228,6 +231,7 @@ export default function RegisterScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.registerCard}>
+            <View style={styles.authBrand}><BrandMark showTagline={false} /></View>
             <Text style={styles.title}>Cadastre-se abaixo</Text>
             <Text style={styles.subtitle}>
               Preencha seus dados para criar sua conta e começar a{"\n"}
@@ -427,195 +431,39 @@ export default function RegisterScreen() {
   );
 }
 
-const getStyles = (theme: any, highContrast: boolean) => StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: highContrast ? theme.mainBg : "#FFF1E6" },
-  container: {
-    flex: 1,
-    backgroundColor: highContrast ? theme.mainBg : "#FFF1E6",
-    ...Platform.select({ web: { minHeight: "100vh" as any, overflow: "hidden" } }),
-  },
-  scrollContainer: {
-    flexGrow: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  circleTopLeft: {
-    position: "absolute",
-    width: 320,
-    height: 320,
-    borderRadius: 160,
-    backgroundColor: highContrast ? "transparent" : "#FFE9D2",
-    top: -100,
-    left: -80,
-  },
-  circleTopRight: {
-    position: "absolute",
-    width: 380,
-    height: 380,
-    borderRadius: 190,
-    backgroundColor: highContrast ? "transparent" : "#F9DDD0",
-    top: -40,
-    right: -60,
-  },
-  circleBottomRight: {
-    position: "absolute",
-    width: 320,
-    height: 320,
-    borderRadius: 160,
-    backgroundColor: highContrast ? "transparent" : "#F9DDD0",
-    bottom: -100,
-    right: -80,
-  },
-  registerCard: {
-    width: "100%",
-    maxWidth: 520,
-    backgroundColor: highContrast ? theme.cardBg : "#FFFFFF",
-    borderWidth: highContrast ? 2 : 0,
-    borderColor: highContrast ? theme.borderColor : "transparent",
-    borderRadius: 24,
-    paddingTop: 40,
-    paddingBottom: 36,
-    paddingHorizontal: 36,
-    shadowColor: highContrast ? "#000000" : "#6D4D3E",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: highContrast ? 0 : 0.1,
-    shadowRadius: 25,
-    elevation: 8,
-    zIndex: 10,
-  },
-  title: {
-    color: highContrast ? theme.textPrimary : "#3D261D",
-    fontSize: 28,
-    fontWeight: "900",
-    textAlign: "center",
-    fontFamily: "serif",
-    marginBottom: 10,
-  },
-  subtitle: {
-    color: highContrast ? theme.textSecondary : "#8C7A70",
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: "center",
-    marginBottom: 28,
-  },
-  rowInputs: { flexDirection: "row", justifyContent: "space-between", gap: 16 },
-  halfInputBox: { flex: 1 },
-  label: { color: highContrast ? theme.textPrimary : "#3D261D", fontSize: 13, fontWeight: "700", marginBottom: 8 },
-  input: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
-    borderRadius: 12,
-    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
-    paddingHorizontal: 16,
-    color: highContrast ? theme.textPrimary : "#3D261D",
-    fontSize: 14,
-    marginBottom: 16,
-    ...Platform.select({ web: { outlineStyle: "none" as any } }),
-  },
-  selectInput: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
-    borderRadius: 12,
-    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
-    paddingHorizontal: 16,
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  placeholderText: { color: highContrast ? theme.textSecondary : "#9D8E85", fontSize: 14 },
-  selectText: { color: highContrast ? theme.textPrimary : "#3D261D", fontSize: 14 },
-  passwordContainer: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: highContrast ? theme.borderColor : "#F0E3DA",
-    borderRadius: 12,
-    backgroundColor: highContrast ? theme.searchBg : "#FFFBF8",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
+const getStyles = (theme: any, highContrast: boolean, compact: boolean) => StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: theme.mainBg },
+  container: { flex: 1, backgroundColor: theme.mainBg, overflow: "hidden", ...Platform.select({ web: { minHeight: "100vh" as any } }) },
+  scrollContainer: { flexGrow: 1, justifyContent: "center", alignItems: "center", padding: compact ? 14 : 20 },
+  circleTopLeft: { position: "absolute", width: 320, height: 320, borderRadius: 160, backgroundColor: highContrast ? "transparent" : (theme.accentSoft || theme.surfaceMuted), top: -100, left: -80, opacity: highContrast ? 0 : 0.9 },
+  circleTopRight: { position: "absolute", width: 380, height: 380, borderRadius: 190, backgroundColor: highContrast ? "transparent" : (theme.surfaceMuted || theme.accentSoft), top: -60, right: -90, opacity: highContrast ? 0 : 0.78 },
+  circleBottomRight: { position: "absolute", width: 320, height: 320, borderRadius: 160, backgroundColor: highContrast ? "transparent" : (theme.accentSoft || theme.surfaceMuted), bottom: -110, right: -80, opacity: highContrast ? 0 : 0.72 },
+  registerCard: { width: "100%", maxWidth: 560, backgroundColor: theme.cardBg, borderWidth: highContrast ? 2 : 1, borderColor: theme.borderColor, borderRadius: 30, borderTopWidth: 4, borderTopColor: theme.accent, paddingVertical: compact ? 28 : 38, paddingHorizontal: compact ? 20 : 36, shadowColor: theme.shadowColor || "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: highContrast ? 0 : 0.12, shadowRadius: 25, elevation: highContrast ? 0 : 8, zIndex: 10 },
+  authBrand: { alignItems: "center", marginBottom: 22 },
+  title: { color: theme.textPrimary, fontSize: compact ? 25 : 29, fontWeight: "900", textAlign: "center", fontFamily: "serif", marginBottom: 10 },
+  subtitle: { color: theme.textSecondary, fontSize: 13, lineHeight: 20, textAlign: "center", marginBottom: 28 },
+  rowInputs: { flexDirection: compact ? "column" : "row", justifyContent: "space-between", gap: compact ? 0 : 16 },
+  halfInputBox: { flex: 1, minWidth: 0 },
+  label: { color: theme.textPrimary, fontSize: 13, fontWeight: "700", marginBottom: 8 },
+  input: { height: 50, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 15, backgroundColor: theme.searchBg, paddingHorizontal: 16, color: theme.textPrimary, fontSize: 14, marginBottom: 16, ...Platform.select({ web: { outlineStyle: "none" as any } }) },
+  selectInput: { height: 50, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 15, backgroundColor: theme.searchBg, paddingHorizontal: 16, justifyContent: "center", marginBottom: 16 },
+  placeholderText: { color: theme.textSecondary, fontSize: 14 },
+  selectText: { color: theme.textPrimary, fontSize: 14 },
+  passwordContainer: { height: 50, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 15, backgroundColor: theme.searchBg, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, marginBottom: 16 },
   lockIcon: { marginRight: 10 },
-  passwordInput: {
-    flex: 1,
-    height: 48,
-    color: highContrast ? theme.textPrimary : "#3D261D",
-    fontSize: 14,
-    paddingVertical: 0,
-    paddingHorizontal: 0,
-    ...Platform.select({ web: { outlineStyle: "none" as any } }),
-  },
-  errorText: {
-    color: highContrast ? "#B00020" : "#C53B2C",
-    fontSize: 12,
-    marginTop: 2,
-    marginBottom: 12,
-    textAlign: "center",
-  },
-  registerButton: {
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: highContrast ? theme.accent : "#E15743",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 10,
-    marginBottom: 20,
-    shadowColor: highContrast ? theme.accent : "#E15743",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  registerButtonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
-  loginFooterContainer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  footerText: { color: highContrast ? theme.textSecondary : "#8C7A70", fontSize: 13 },
-  footerLink: {
-    color: highContrast ? theme.accent : "#E15743",
-    fontSize: 13,
-    fontWeight: "700",
-    marginLeft: 6,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  modalContent: {
-    width: "100%",
-    maxWidth: 350,
-    backgroundColor: highContrast ? theme.cardBg : "#FFF",
-    borderWidth: highContrast ? 2 : 0,
-    borderColor: highContrast ? theme.borderColor : "transparent",
-    borderRadius: 20,
-    padding: 24,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: highContrast ? theme.textPrimary : "#3D261D",
-    marginBottom: 16,
-    textAlign: "center",
-  },
-  modalOption: {
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: highContrast ? theme.borderColor : "#F0E3DA",
-  },
-  modalOptionText: { fontSize: 15, color: highContrast ? theme.textPrimary : "#3D261D", textAlign: "center" },
-  modalEmpty: { color: highContrast ? theme.textSecondary : "#9D8E85", textAlign: "center", paddingVertical: 20 },
+  passwordInput: { flex: 1, height: 48, color: theme.textPrimary, fontSize: 14, paddingVertical: 0, paddingHorizontal: 0, ...Platform.select({ web: { outlineStyle: "none" as any } }) },
+  errorText: { color: theme.danger || "#B42318", fontSize: 12, marginTop: 2, marginBottom: 12, textAlign: "center" },
+  registerButton: { height: 54, borderRadius: 16, backgroundColor: theme.accent, justifyContent: "center", alignItems: "center", marginTop: 10, marginBottom: 20, shadowColor: theme.shadowColor || theme.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: highContrast ? 0 : 0.18, shadowRadius: 8, elevation: highContrast ? 0 : 4 },
+  registerButtonText: { color: theme.onAccent || "#FFFFFF", fontSize: 16, fontWeight: "800" },
+  loginFooterContainer: { flexDirection: "row", justifyContent: "center", alignItems: "center", flexWrap: "wrap" },
+  footerText: { color: theme.textSecondary, fontSize: 13 },
+  footerLink: { color: theme.accent, fontSize: 13, fontWeight: "700", marginLeft: 6 },
+  modalOverlay: { flex: 1, backgroundColor: theme.overlay || "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 },
+  modalContent: { width: "100%", maxWidth: 380, backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 26, padding: 24, shadowColor: theme.shadowColor || "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: highContrast ? 0 : 0.15, shadowRadius: 10, elevation: highContrast ? 0 : 10 },
+  modalTitle: { fontSize: 18, fontWeight: "800", color: theme.textPrimary, marginBottom: 16, textAlign: "center" },
+  modalOption: { minHeight: 46, justifyContent: "center", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.borderColor },
+  modalOptionText: { fontSize: 15, color: theme.textPrimary, textAlign: "center" },
+  modalEmpty: { color: theme.textSecondary, textAlign: "center", paddingVertical: 20 },
   loadingContainer: { alignItems: "center", paddingVertical: 30 },
-  loadingText: { color: highContrast ? theme.textSecondary : "#9D8E85", marginTop: 12, fontSize: 14 },
+  loadingText: { color: theme.textSecondary, marginTop: 12, fontSize: 14 },
 });

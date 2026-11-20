@@ -1,0 +1,33 @@
+PORTAL DA ARTE - PALETA RESTAURADA
+Data: 20/11/2026
+
+Esta versão mantém integralmente o redesign autoral/estilizado, mas volta a usar a paleta da versão refinada imediatamente anterior.
+
+TEMA CLARO
+- Fundo principal: #FAF5F1
+- Sidebar/Header/Card: #FFFFFF
+- Texto principal: #2D1B13
+- Texto secundário: #6F625C
+- Cor de destaque (laranja): #B94A0A
+- Fundo suave do destaque: #FBE8DC
+- Campo/pesquisa: #F8F1EC
+- Bordas: #E6D8CF
+- Item ativo: #FFF0E6
+
+TEMA ESCURO
+- Sidebar/Header: #0E1728
+- Fundo principal: #111A2B
+- Cards: #151F32
+- Superfície elevada: #182438
+- Texto principal: #F8FAFC
+- Texto secundário: #B6C1D0
+- Cor de destaque (laranja): #C65316
+- Campo/pesquisa: #0B1322
+- Bordas: #2B3950
+- Item ativo: #2A201E
+
+ALTO CONTRASTE
+- Mantido o modo dedicado de alto contraste em preto/branco/azul, sem alteração funcional.
+
+OBSERVAÇÃO
+As chaves visuais novas do redesign (hero, marca, destaques editoriais e Sidebar) foram mapeadas para estas mesmas cores. Não foram mantidos os dourados, bordôs ou tons plum que haviam sido introduzidos exclusivamente na versão estilizada.

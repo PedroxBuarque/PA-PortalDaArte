@@ -44,3 +44,8 @@ example
 # generated native folders
 /ios
 /android
+
+# Credenciais locais - nunca versionar
+.env
+.env.*
+!.env.example

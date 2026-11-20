@@ -1154,6 +1154,64 @@ LOCK TABLES `visualizacoes_perfil_artista` WRITE;
 /*!40000 ALTER TABLE `visualizacoes_perfil_artista` DISABLE KEYS */;
 /*!40000 ALTER TABLE `visualizacoes_perfil_artista` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Table structures for carrinho + Asaas Checkout
+--
+
+DROP TABLE IF EXISTS `eventos_asaas_checkout`;
+CREATE TABLE `eventos_asaas_checkout` (
+  `evento_id` varchar(100) NOT NULL,
+  `tipo` varchar(80) NOT NULL,
+  `checkout_id` varchar(100) DEFAULT NULL,
+  `payload_json` longtext NOT NULL,
+  `criado_em` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`evento_id`),
+  KEY `idx_evento_checkout` (`checkout_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TABLE IF EXISTS `pedido_carrinho_itens`;
+DROP TABLE IF EXISTS `pedidos_carrinho`;
+CREATE TABLE `pedidos_carrinho` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `contratante_id` bigint(20) NOT NULL,
+  `checkout_externo_id` varchar(100) DEFAULT NULL,
+  `status` enum('criando','aguardando_pagamento','pago','cancelado','expirado','erro') NOT NULL DEFAULT 'criando',
+  `valor_total` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `criado_em` datetime NOT NULL DEFAULT current_timestamp(),
+  `atualizado_em` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `pago_em` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_pedido_checkout` (`checkout_externo_id`),
+  KEY `idx_pedido_contratante` (`contratante_id`),
+  KEY `idx_pedido_status` (`status`),
+  CONSTRAINT `fk_pedido_contratante` FOREIGN KEY (`contratante_id`) REFERENCES `usuarios` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `pedido_carrinho_itens` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `pedido_id` bigint(20) NOT NULL,
+  `servico_id` bigint(20) NOT NULL,
+  `artista_id` bigint(20) NOT NULL,
+  `titulo` varchar(150) NOT NULL,
+  `descricao` text DEFAULT NULL,
+  `modalidade` varchar(30) DEFAULT NULL,
+  `valor_unitario` decimal(12,2) NOT NULL,
+  `proposta_id` bigint(20) DEFAULT NULL,
+  `contrato_id` bigint(20) DEFAULT NULL,
+  `criado_em` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_pedido_servico` (`pedido_id`,`servico_id`),
+  KEY `idx_item_pedido` (`pedido_id`),
+  KEY `idx_item_servico` (`servico_id`),
+  KEY `idx_item_artista` (`artista_id`),
+  CONSTRAINT `fk_item_pedido` FOREIGN KEY (`pedido_id`) REFERENCES `pedidos_carrinho` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_item_servico` FOREIGN KEY (`servico_id`) REFERENCES `servicos` (`id`),
+  CONSTRAINT `fk_item_artista` FOREIGN KEY (`artista_id`) REFERENCES `perfis_artista` (`usuario_id`),
+  CONSTRAINT `fk_item_proposta` FOREIGN KEY (`proposta_id`) REFERENCES `propostas` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_item_contrato` FOREIGN KEY (`contrato_id`) REFERENCES `contratos` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;

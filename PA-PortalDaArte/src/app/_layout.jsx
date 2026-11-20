@@ -7,6 +7,7 @@ import { ProfileProvider } from '../components/context/ProfileContext';
 import { AuthProvider, AuthGate } from '../components/context/AuthContext';
 import { SearchProvider } from '../components/context/SearchContext';
 import { FavoritesProvider } from '../components/context/FavoritesContext';
+import { CartProvider } from '../components/context/CartContext';
 import AuthModal from '../components/AuthModal';
 
 
@@ -21,12 +22,14 @@ export default function RootLayout() {
           <AuthProvider>
             <SearchProvider>
              <FavoritesProvider>
+              <CartProvider>
               {/* AuthGate bloqueia as rotas privadas (inclusive acesso direto por URL) */}
               <AuthGate>
                 <Slot />
               </AuthGate>
               {/* Aviso global para visitantes (abre via requireAuth / openAuthModal) */}
               <AuthModal />
+              </CartProvider>
              </FavoritesProvider>
             </SearchProvider>
           </AuthProvider>

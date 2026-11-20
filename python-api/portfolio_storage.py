@@ -349,8 +349,10 @@ class LimiteUploadPortfolioMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if (scope["type"] != "http" or scope.get("method") != "POST"
-                or scope.get("path", "").rstrip("/") != "/api/artistas/portfolio/arquivo"):
+        path = scope.get("path", "").rstrip("/")
+        upload_portfolio = path == "/api/artistas/portfolio/arquivo"
+        upload_mensagem = bool(re.fullmatch(r"/api/conversas/[1-9][0-9]*/mensagens/arquivo", path))
+        if scope["type"] != "http" or scope.get("method") != "POST" or not (upload_portfolio or upload_mensagem):
             await self.app(scope, receive, send)
             return
         try:

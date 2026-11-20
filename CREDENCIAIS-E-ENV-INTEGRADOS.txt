@@ -1,0 +1,27 @@
+PORTAL DA ARTE - CREDENCIAIS E .ENV INTEGRADOS
+================================================
+
+Fontes usadas nesta consolidacao:
+- .env backend real do projeto enviado anteriormente (MySQL, SMTP, Supabase e demais configuracoes).
+- .env frontend real do projeto enviado anteriormente (EXPO_PUBLIC_API_URL).
+- PortalDaArte-Somente-Pagamentos.zip para o modulo financeiro Asaas Sandbox.
+
+Integrado no pacote:
+- python-api/.env com as configuracoes reais ja fornecidas anteriormente.
+- PA-PortalDaArte/.env com a URL real de API fornecida anteriormente.
+- ASAAS_ENV=sandbox.
+- Token privado de webhook gerado para este pacote.
+- URLs de retorno do Checkout para a tela do carrinho local.
+- Variaveis do modulo PIX/NFS-e Sandbox.
+
+ATENCAO - UNICO SEGREDO DE PAGAMENTO AUSENTE NO MATERIAL ENVIADO:
+ASAAS_API_KEY nao estava preenchida no ZIP de pagamentos nem nos .env dos RARs anteriores.
+Por isso ela permanece vazia em python-api/.env e precisa receber a chave Sandbox da conta Asaas.
+
+Tambem dependem do seu ambiente externo:
+- ASAAS_WEBHOOK_PUBLIC_URL: URL HTTPS publica do backend.
+- ASAAS_PIX_FEE_ESTIMATED: tarifa Sandbox usada no fluxo PIX individual.
+- ASAAS_NF_BASE / ASAAS_NF_CONFIG_JSON: dados fiscais municipais para NFS-e, se esse fluxo for usado.
+
+SEGURANCA:
+Este pacote contem .env privados. Nao envie o ZIP para repositorios publicos e nao comite os .env no Git.
