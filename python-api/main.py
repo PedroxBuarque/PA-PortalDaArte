@@ -1111,6 +1111,7 @@ def listar_conversas(current_user: dict = Depends(get_usuario_atual)):
                 c.contratante_id,
                 c.artista_id,
                 c.servico_id,
+                (c.contratante_id = %s) AS pode_solicitar,
                 CASE WHEN c.contratante_id = %s THEN c.artista_id ELSE c.contratante_id END AS outro_usuario_id,
                 COALESCE(pa.nome_artistico, p.nome_completo, u.email, 'Usuário') AS nome,
                 p.foto_perfil_url AS foto_perfil,
@@ -1142,9 +1143,10 @@ def listar_conversas(current_user: dict = Depends(get_usuario_atual)):
                  ORDER BY m2.criado_em DESC, m2.id DESC LIMIT 1),
                 c.criado_em
             ) DESC
-        """, (usuario_id, usuario_id, usuario_id, usuario_id, usuario_id))
+        """, (usuario_id, usuario_id, usuario_id, usuario_id, usuario_id, usuario_id))
         rows = cursor.fetchall()
         for row in rows:
+            row["pode_solicitar"] = bool(row.get("pode_solicitar"))
             if row.get("ultima_mensagem_em"):
                 row["ultima_mensagem_em"] = row["ultima_mensagem_em"].isoformat()
             midia = _decodificar_mensagem_midia(row.get("ultima_mensagem") or "")
@@ -2121,10 +2123,11 @@ def excluir_item_portfolio(portfolio_id: int, current_user: dict = Depends(get_u
 
 def _normalizar_proposta(row: dict, usuario_id: int):
     result = dict(row)
-    for field in ("valor_proposto",):
+    for field in ("valor_proposto", "avaliacao_media"):
         if result.get(field) is not None:
             result[field] = float(result[field])
-    for field in ("prazo_estimado", "criado_em", "atualizado_em"):
+    result["avaliacoes_total"] = int(result.get("avaliacoes_total") or 0)
+    for field in ("prazo_estimado", "criado_em", "atualizado_em", "contrato_data_inicio", "contrato_data_conclusao"):
         value = result.get(field)
         if value is not None and hasattr(value, "isoformat"):
             result[field] = value.isoformat()
@@ -2160,6 +2163,31 @@ def enviar_proposta(proposta: PropostaCreate, current_user: dict = Depends(get_u
             if not cursor.fetchone():
                 raise HTTPException(status_code=400, detail="O serviço informado não pertence ao artista desta conversa.")
 
+        # Lock da conversa acima serializa chamadas concorrentes para este par.
+        # Uma repetição idêntica enviada por erro de rede dentro de 30s devolve
+        # o mesmo registro, sem mensagem/contratação duplicada.
+        cursor.execute("""
+            SELECT id FROM propostas
+            WHERE conversa_id = %s AND contratante_id = %s AND artista_id = %s
+              AND servico_id <=> %s AND descricao_escopo = %s
+              AND local_ou_modalidade <=> %s AND prazo_estimado <=> %s
+              AND valor_proposto = %s
+              AND criado_em >= DATE_SUB(NOW(), INTERVAL 30 SECOND)
+            ORDER BY id DESC LIMIT 1
+        """, (
+            proposta.conversa_id, conversa["contratante_id"], conversa["artista_id"],
+            servico_id, proposta.descricao_escopo.strip(),
+            (proposta.local_ou_modalidade or "").strip() or None,
+            prazo, proposta.valor_proposto,
+        ))
+        anterior = cursor.fetchone()
+        if anterior:
+            conexao.commit()
+            return {
+                "status": "sucesso", "mensagem": "Proposta já registrada",
+                "proposta_id": int(anterior["id"]), "conversa_id": proposta.conversa_id,
+                "reutilizada": True,
+            }
         cursor.execute("""
             INSERT INTO propostas
                 (conversa_id, contratante_id, artista_id, servico_id, descricao_escopo,
@@ -2203,8 +2231,12 @@ def _query_propostas_base():
             COALESCE(perfil_cli.nome_completo, uc.email, 'Contratante') AS contratante_nome,
             COALESCE(s.titulo, pa.categoria_atuacao, 'Serviço artístico') AS servico_titulo,
             pa.categoria_atuacao,
+            COALESCE(ra.avaliacao_media, 0) AS avaliacao_media,
+            COALESCE(ra.avaliacoes_total, 0) AS avaliacoes_total,
             ct.id AS contrato_id,
-            ct.status AS contrato_status
+            ct.status AS contrato_status,
+            ct.data_inicio AS contrato_data_inicio,
+            ct.data_conclusao AS contrato_data_conclusao
         FROM propostas p
         INNER JOIN usuarios ua ON ua.id = p.artista_id
         INNER JOIN usuarios uc ON uc.id = p.contratante_id
@@ -2213,7 +2245,44 @@ def _query_propostas_base():
         LEFT JOIN perfis perfil_cli ON perfil_cli.usuario_id = p.contratante_id
         LEFT JOIN servicos s ON s.id = p.servico_id
         LEFT JOIN contratos ct ON ct.proposta_id = p.id
+        LEFT JOIN (
+            SELECT avaliado_id, ROUND(AVG(nota), 2) AS avaliacao_media, COUNT(*) AS avaliacoes_total
+            FROM avaliacoes GROUP BY avaliado_id
+        ) ra ON ra.avaliado_id = p.artista_id
     """
+
+
+@app.get("/api/conversas/{conversa_id}/propostas", tags=["Marketplace"])
+def listar_propostas_conversa(conversa_id: int, current_user: dict = Depends(get_usuario_atual)):
+    """Exibe apenas propostas da conversa acessível ao usuário autenticado."""
+    conexao = None
+    cursor = None
+    try:
+        usuario_id = int(current_user["id"])
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT id FROM conversas
+            WHERE id = %s AND (contratante_id = %s OR artista_id = %s)
+        """, (conversa_id, usuario_id, usuario_id))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+        cursor.execute(
+            _query_propostas_base() +
+            " WHERE p.conversa_id = %s ORDER BY p.criado_em DESC, p.id DESC",
+            (conversa_id,))
+        propostas = [_normalizar_proposta(row, usuario_id) for row in cursor.fetchall()]
+        for proposta in propostas:
+            proposta["pode_responder"] = proposta["papel_atual"] == "artista" and proposta["status"] == "em_negociacao"
+        return {"propostas": propostas}
+    except HTTPException:
+        raise
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Não foi possível consultar as propostas da conversa.")
+    finally:
+        if cursor: cursor.close()
+        if conexao: conexao.close()
 
 
 @app.get("/api/propostas", tags=["Marketplace"])
@@ -2256,6 +2325,43 @@ def obter_proposta(proposta_id: int, current_user: dict = Depends(get_usuario_at
     finally:
         if cursor: cursor.close()
         if conexao: conexao.close()
+
+
+# Compatibilidade com a versão validada anteriormente que consultava
+# GET /api/contratacoes e GET /api/contratacoes/{id}.
+# A origem de dados continua sendo propostas/contratos, sem sistema paralelo.
+def _proposta_legada(item: dict) -> dict:
+    contrato_status = item.get("contrato_status")
+    status = item.get("status")
+    if contrato_status == "concluido":
+        exibicao = "Concluído"
+    elif contrato_status == "cancelado":
+        exibicao = "Cancelado"
+    elif contrato_status == "em_disputa":
+        exibicao = "Em disputa"
+    else:
+        exibicao = {
+            "em_negociacao": "Pendente", "aceita": "Confirmado",
+            "recusada": "Recusado", "expirada": "Expirado",
+        }.get(status, status)
+    return {
+        **item,
+        "proposta_status": status,
+        "status_exibicao": exibicao,
+        "papel": item.get("papel_atual"),
+    }
+
+
+@app.get("/api/contratacoes", tags=["Marketplace"])
+def listar_contratacoes(current_user: dict = Depends(get_usuario_atual)):
+    resposta = listar_propostas(current_user=current_user)
+    return {"contratacoes": [_proposta_legada(p) for p in resposta["propostas"]]}
+
+
+@app.get("/api/contratacoes/{proposta_id}", tags=["Marketplace"])
+def obter_contratacao(proposta_id: int, current_user: dict = Depends(get_usuario_atual)):
+    resposta = obter_proposta(proposta_id=proposta_id, current_user=current_user)
+    return {"contratacao": _proposta_legada(resposta["proposta"])}
 
 
 @app.post("/api/propostas/{proposta_id}/responder", tags=["Marketplace"])
