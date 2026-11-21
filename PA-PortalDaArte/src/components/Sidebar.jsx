@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, StyleSheet, View, TouchableOpacity } from 'react-native';
+import { Platform, StyleSheet, ScrollView, View, TouchableOpacity } from 'react-native';
 import { router, usePathname } from 'expo-router';
 import { Sparkles } from 'lucide-react-native';
 import { PRIMARY_NAV_ITEMS, SETTINGS_NAV_ITEM } from '../constants/navigation';
@@ -55,6 +55,7 @@ export default function Sidebar() {
 
   return (
     <View style={styles.sidebar} accessibilityLabel="Navegação principal">
+      <ScrollView style={styles.sidebarScroll} contentContainerStyle={styles.sidebarScrollContent} showsVerticalScrollIndicator={false}>
       <TouchableOpacity
         onPress={() => router.navigate('/pages/explorar/explorar')}
         activeOpacity={0.82}
@@ -81,6 +82,7 @@ export default function Sidebar() {
 
       <View style={styles.footerDivider} />
       <View style={styles.footerMenu}>{renderItem(SETTINGS_NAV_ITEM)}</View>
+      </ScrollView>
     </View>
   );
 }
@@ -97,6 +99,8 @@ const getStyles = (theme) =>
       borderRightColor: theme.sidebarBorder || theme.borderColor,
       ...Platform.select({ web: { boxShadow: `5px 0 20px ${theme.shadowColor}` } }),
     },
+    sidebarScroll: { flex: 1, minHeight: 0 },
+    sidebarScrollContent: { flexGrow: 1 },
     brandContainer: {
       paddingHorizontal: 7,
       paddingVertical: 6,

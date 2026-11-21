@@ -16,6 +16,7 @@ import { ArrowLeft, CalendarDays, MapPin, MessageCircle, Music, UserRound, Walle
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 
 import Sidebar from '../../../components/Sidebar';
+import { DESKTOP_BREAKPOINT } from '../../../constants/responsive';
 import Header from '../../../components/Header';
 import { useTheme } from '../../../components/context/ThemeContext';
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
@@ -34,7 +35,7 @@ export default function DetalhesContratacaoScreen() {
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const { theme, isLightMode } = useTheme();
   const { width } = useWindowDimensions();
-  const compact = width < 900;
+  const compact = width < DESKTOP_BREAKPOINT;
   const narrow = width < 620;
   const styles = getStyles(theme, compact, narrow);
   const [item, setItem] = useState<PropostaApi | null>(null);
@@ -226,9 +227,9 @@ export default function DetalhesContratacaoScreen() {
 }
 
 const getStyles = (theme: any, compact: boolean, narrow: boolean) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.mainBg, ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }) },
+  container: { flex: 1, backgroundColor: theme.mainBg, ...Platform.select({ web: compact ? { minHeight: '100dvh' as any } : { height: '100vh' as any, overflow: 'hidden' } }) },
   dashboardContainer: { flex: 1, flexDirection: 'row', backgroundColor: theme.mainBg },
-  mainContent: { flex: 1, backgroundColor: theme.mainBg, ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }) },
+  mainContent: { flex: 1, backgroundColor: theme.mainBg, ...Platform.select({ web: compact ? { minHeight: '100dvh' as any } : { height: '100vh' as any, overflow: 'hidden' } }) },
   scrollView: { flex: 1 },
   scrollContent: { flexGrow: 1 },
   contentWrapper: { width: '100%', maxWidth: 980, alignSelf: 'center', paddingHorizontal: compact ? 18 : 32, paddingTop: compact ? 18 : 26, paddingBottom: 36 },
@@ -259,12 +260,12 @@ const getStyles = (theme: any, compact: boolean, narrow: boolean) => StyleSheet.
   scopeBox: { backgroundColor: theme.surfaceMuted || theme.mainBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 18, padding: 16, marginTop: 4 },
   scopeText: { color: theme.textPrimary, fontSize: 13, lineHeight: 20, marginTop: 6 },
   contractText: { color: theme.accent, fontSize: 12, fontWeight: '700', marginTop: 16 },
-  chatButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 9,
+  chatButton: { alignSelf: 'flex-start', maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 9,
     backgroundColor: theme.accent, paddingHorizontal: 16, paddingVertical: 12,
     borderRadius: 12, marginTop: 14 },
-  chatButtonText: { color: theme.onAccent || '#FFFFFF', fontWeight: '800', fontSize: 12 },
+  chatButtonText: { color: theme.onAccent || '#FFFFFF', fontWeight: '800', fontSize: 12, flexShrink: 1 },
   actions: { flexDirection: narrow ? 'column-reverse' : 'row', justifyContent: 'flex-end', gap: 10, marginTop: 24 },
-  actionButton: { borderRadius: 12, minHeight: 46, paddingHorizontal: 18, paddingVertical: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  actionButton: { width: narrow ? '100%' : undefined, borderRadius: 12, minHeight: 46, paddingHorizontal: 18, paddingVertical: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   rejectButton: { backgroundColor: theme.cardBg, borderColor: '#C0392B' },
   acceptButton: { backgroundColor: theme.accent, borderColor: theme.accent },
   rejectText: { color: '#C0392B', fontWeight: '700' },

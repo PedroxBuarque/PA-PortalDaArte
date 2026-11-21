@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { Modal, Platform, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { usePathname, useRouter } from "expo-router";
 import { useTheme } from "./context/ThemeContext";
 import { closeAuthModal, useAuthModal } from "./context/AuthContext";
@@ -17,10 +17,11 @@ export const AUTH_MODAL_MESSAGE =
  */
 export default function AuthModal() {
   const { theme } = useTheme();
+  const { width } = useWindowDimensions();
   const router = useRouter();
   const pathname = usePathname();
   const { visible, redirect } = useAuthModal();
-  const styles = getStyles(theme);
+  const styles = getStyles(theme, width < 420);
 
   // Qualquer navegação fecha o modal (voltar, trocar de tela...).
   useEffect(() => {
@@ -43,6 +44,7 @@ export default function AuthModal() {
         accessibilityHint="Fecha este aviso sem entrar ou criar uma conta"
       >
         {/* O toque dentro do cartão não fecha o modal */}
+        <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <TouchableOpacity activeOpacity={1} style={styles.card} testID="auth-modal-card" accessibilityViewIsModal>
           <View style={styles.brandWrap} accessible={false}><BrandMark showTagline={false} /></View>
           <Text style={styles.eyebrow}>CONTINUE SUA EXPERIÊNCIA</Text>
@@ -75,12 +77,13 @@ export default function AuthModal() {
             <Text style={styles.dismissText}>Agora não</Text>
           </TouchableOpacity>
         </TouchableOpacity>
+        </ScrollView>
       </TouchableOpacity>
     </Modal>
   );
 }
 
-const getStyles = (theme: any) =>
+const getStyles = (theme: any, smallPhone: boolean) =>
   StyleSheet.create({
     overlay: {
       flex: 1,
@@ -89,6 +92,8 @@ const getStyles = (theme: any) =>
       justifyContent: "center",
       padding: 20,
     },
+    modalScroll: { width: "100%", maxHeight: "92%" },
+    modalScrollContent: { flexGrow: 1, justifyContent: "center", alignItems: "center", paddingVertical: 12 },
     card: {
       width: "100%",
       maxWidth: 420,
@@ -96,7 +101,7 @@ const getStyles = (theme: any) =>
       borderRadius: 28,
       borderWidth: 1,
       borderColor: theme.borderColor,
-      padding: 30,
+      padding: smallPhone ? 18 : 30,
       borderTopWidth: 4,
       borderTopColor: theme.accent,
       ...Platform.select({ web: { boxShadow: `0 24px 60px ${theme.shadowStrong || theme.shadowColor}` } }),
@@ -105,7 +110,7 @@ const getStyles = (theme: any) =>
     eyebrow: { color: theme.accent, fontSize: 9, fontWeight: "900", letterSpacing: 1.5, textAlign: "center", marginBottom: 6 },
     title: {
       color: theme.textPrimary,
-      fontSize: 25,
+      fontSize: smallPhone ? 21 : 25,
       fontWeight: "900",
       fontFamily: "serif",
       textAlign: "center",

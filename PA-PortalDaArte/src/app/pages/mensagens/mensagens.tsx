@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View, TouchableOpacity, SafeAreaView, StatusBar, ScrollView, Platform, Alert, Image, Modal, useWindowDimensions } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, SafeAreaView, StatusBar, ScrollView, Platform, Alert, Image, Modal, KeyboardAvoidingView, useWindowDimensions } from 'react-native';
 import { AccessibleTextInput as TextInput } from '../../../components/accessibility/AccessibleTextInput';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -23,6 +23,7 @@ import { formatarMoeda, responderProposta as responderPropostaApi, statusPropost
 
 // Importações dos Componentes e do Contexto
 import Sidebar from '../../../components/Sidebar';
+import { DESKTOP_BREAKPOINT, MOBILE_BREAKPOINT } from '../../../constants/responsive';
 import Header from '../../../components/Header';
 import { useTheme } from '../../../components/context/ThemeContext';
 
@@ -93,8 +94,8 @@ export default function MensagensScreen() {
   const router = useRouter();
   const { theme, isLightMode } = useTheme();
   const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
-  const compactShell = viewportWidth < 900;
-  const compactChat = viewportWidth < 760;
+  const compactShell = viewportWidth < DESKTOP_BREAKPOINT;
+  const compactChat = viewportWidth < MOBILE_BREAKPOINT;
   const styles = getStyles(theme, compactChat, viewportWidth, viewportHeight) as any;
 
   const params = useLocalSearchParams<{ destinatarioId?: string | string[]; destinatarioNome?: string | string[]; conversaId?: string | string[]; contratar?: string | string[] }>();
@@ -532,9 +533,13 @@ export default function MensagensScreen() {
       />
       <Modal visible={proposalVisible && podeSolicitarContratacao} transparent animationType="fade"
         onRequestClose={() => setProposalVisible(false)}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.overlay || '#0009', padding: 16 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={{ flex: 1, justifyContent: 'center', backgroundColor: theme.overlay || '#0009', padding: 12 }}>
+          <ScrollView style={{ width: '100%', maxHeight: Math.max(260, viewportHeight * 0.9) }}
+            contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 }}
+            keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={{ width: '100%', maxWidth: 470, backgroundColor: theme.cardBg, borderRadius: 22,
-            borderColor: theme.borderColor, borderWidth: 1, padding: 22, gap: 12 }}>
+            borderColor: theme.borderColor, borderWidth: 1, padding: compactChat ? 16 : 22, gap: 12 }}>
             <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: '900' }}>Solicitar contratação</Text>
             <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
               A solicitação será registrada em Contratações e vinculada a esta conversa.
@@ -566,7 +571,9 @@ export default function MensagensScreen() {
               <Text style={{ color: theme.textSecondary, fontWeight: '700', textAlign: 'center' }}>Cancelar</Text>
             </TouchableOpacity>
           </View>
+          </ScrollView>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
       <View style={styles.dashboardContainer}>
         {!compactShell ? <Sidebar /> : null}
@@ -1036,23 +1043,24 @@ const getStyles = (theme: any, compactChat: boolean, viewportWidth: number, view
     container: {
       flex: 1,
       backgroundColor: theme.mainBg,
-      ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }),
+      ...Platform.select({ web: { height: viewportWidth < DESKTOP_BREAKPOINT ? '100dvh' as any : '100vh' as any, overflow: 'hidden' } }),
     },
     dashboardContainer: {
       flex: 1,
       flexDirection: 'row',
       backgroundColor: theme.mainBg,
-      ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }),
+      ...Platform.select({ web: { height: viewportWidth < DESKTOP_BREAKPOINT ? '100dvh' as any : '100vh' as any, overflow: 'hidden' } }),
     },
     mainContent: {
       flex: 1,
       backgroundColor: theme.mainBg,
       ...Platform.select({
-        web: { height: '100vh' as any, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+        web: { height: viewportWidth < DESKTOP_BREAKPOINT ? '100dvh' as any : '100vh' as any, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
       }),
     },
     messagesLayout: {
       flex: 1,
+      minHeight: 0,
       flexDirection: 'row',
       overflow: 'hidden',
     },
@@ -1173,6 +1181,8 @@ const getStyles = (theme: any, compactChat: boolean, viewportWidth: number, view
     },
     chatPanel: {
       flex: 1,
+      minHeight: 0,
+      minWidth: 0,
       flexDirection: 'column',
     },
     chatEmptyState: {
@@ -1257,7 +1267,8 @@ const getStyles = (theme: any, compactChat: boolean, viewportWidth: number, view
     },
     messagesScroll: {
       flex: 1,
-      paddingHorizontal: 24,
+      minHeight: 0,
+      paddingHorizontal: compactChat ? 12 : 24,
     },
     messagesScrollContent: {
       paddingVertical: 16,
@@ -1379,14 +1390,14 @@ const getStyles = (theme: any, compactChat: boolean, viewportWidth: number, view
       marginBottom: 2,
     },
     chatImageMessage: {
-      width: 220,
-      height: 150,
+      width: Math.min(220, Math.max(130, viewportWidth - 110)),
+      height: Math.min(150, Math.max(90, (viewportWidth - 110) * 0.68)),
       borderRadius: 8,
       resizeMode: 'cover',
     },
     exactVideoSize: {
-      width: 220,
-      height: 150,
+      width: Math.min(220, Math.max(130, viewportWidth - 110)),
+      height: Math.min(150, Math.max(90, (viewportWidth - 110) * 0.68)),
       borderRadius: 8,
     },
     modalExactVideoSize: {
@@ -1394,8 +1405,8 @@ const getStyles = (theme: any, compactChat: boolean, viewportWidth: number, view
       height: viewportHeight * 0.8,
     },
     videoThumbnailContainer: {
-      width: 220,
-      height: 150,
+      width: Math.min(220, Math.max(130, viewportWidth - 110)),
+      height: Math.min(150, Math.max(90, (viewportWidth - 110) * 0.68)),
       borderRadius: 8,
       overflow: 'hidden',
       backgroundColor: '#000',
@@ -1473,6 +1484,7 @@ const getStyles = (theme: any, compactChat: boolean, viewportWidth: number, view
       width: 42,
       height: 42,
       borderRadius: 14,
+      flexShrink: 0,
       alignItems: 'center',
       justifyContent: 'center',
       marginLeft: 8,
@@ -1499,7 +1511,8 @@ const getStyles = (theme: any, compactChat: boolean, viewportWidth: number, view
       height: viewportHeight * 0.8,
     },
     dadosModalContent: {
-      width: 320,
+      width: Math.min(320, Math.max(240, viewportWidth - 32)),
+      maxWidth: '100%',
       backgroundColor: theme.cardBg,
       borderRadius: 12,
       padding: 20,

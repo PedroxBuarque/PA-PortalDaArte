@@ -20,6 +20,7 @@ import { AppVideo } from '../../../components/media/AppVideo';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Header from "../../../components/Header";
 import Sidebar from "../../../components/Sidebar";
+import { DESKTOP_BREAKPOINT, MOBILE_BREAKPOINT } from "../../../constants/responsive";
 import { useTheme } from "../../../components/context/ThemeContext";
 import { useCart } from "../../../components/context/CartContext";
 import { openPortfolioFile, portfolioCoverFromApi, portfolioFileFromApi } from "../../../services/portfolio";
@@ -43,8 +44,8 @@ const asText = (value: any): string => {
 export default function PerfilPublicoScreen() {
   const { theme, isLightMode } = useTheme();
   const { width } = useWindowDimensions();
-  const showSidebar = width >= 900;
-  const narrow = width < 680;
+  const showSidebar = width >= DESKTOP_BREAKPOINT;
+  const narrow = width < MOBILE_BREAKPOINT;
   const styles = getStyles(theme, narrow);
   const router = useRouter();
   const params = useLocalSearchParams<{ id?: string | string[] }>();
@@ -562,7 +563,7 @@ const getStyles = (theme: any, narrow: boolean) => StyleSheet.create({
   heroTop: { flexDirection: narrow ? "column" : "row", alignItems: narrow ? "flex-start" : "center", gap: 20 },
   avatar: { width: narrow ? 96 : 120, height: narrow ? 96 : 120, borderRadius: narrow ? 22 : 26, backgroundColor: theme.mainBg, borderWidth: 3, borderColor: theme.accent },
   avatarFallback: { width: narrow ? 96 : 120, height: narrow ? 96 : 120, borderRadius: narrow ? 22 : 26, backgroundColor: theme.accentSoft || theme.mainBg, borderWidth: 3, borderColor: theme.accent, alignItems: "center", justifyContent: "center" },
-  heroDetails: { flex: 1, gap: 7 },
+  heroDetails: { flex: 1, minWidth: 0, gap: 7 },
   name: { color: theme.heroText || "#FFFFFF", fontSize: narrow ? 27 : 34, lineHeight: narrow ? 32 : 40, fontWeight: "900" as any, fontFamily: "serif", letterSpacing: -0.7 },
   subtitle: { color: theme.artGold || theme.accent, fontSize: 12, fontWeight: "900", letterSpacing: 0.5 },
   locationRow: { flexDirection: "row", alignItems: "center", gap: 6 },
@@ -578,7 +579,7 @@ const getStyles = (theme: any, narrow: boolean) => StyleSheet.create({
   sectionCard: { backgroundColor: theme.cardBg, borderColor: theme.borderColor, borderWidth: 1, borderLeftWidth: 4, borderLeftColor: theme.accent, borderRadius: 22, padding: narrow ? 18 : 24, gap: 14, ...Platform.select({ web: { boxShadow: `0 10px 28px ${theme.shadowColor}` } }) },
   sectionTitle: { color: theme.textPrimary, fontSize: 20, fontWeight: "900", fontFamily: "serif" },
   bodyText: { color: theme.textSecondary, fontSize: 14, lineHeight: 22 },
-  infoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 28, marginTop: 8 },
+  infoGrid: { flexDirection: "row", flexWrap: "wrap", gap: narrow ? 16 : 28, marginTop: 8 },
   infoItem: { gap: 4 },
   infoLabel: { color: theme.textSecondary, fontSize: 12 },
   infoValue: { color: theme.textPrimary, fontSize: 14, fontWeight: "700" },
@@ -623,7 +624,7 @@ const getStyles = (theme: any, narrow: boolean) => StyleSheet.create({
   videoTitle: { color: theme.textPrimary, fontSize: 11, fontWeight: "700" },
   videoSubtitle: { color: theme.textSecondary, fontSize: 9, marginTop: 3 },
   serviceIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: theme.mainBg, alignItems: "center", justifyContent: "center" },
-  serviceTextWrap: { flex: 1, gap: 5 },
+  serviceTextWrap: { flex: 1, minWidth: 0, gap: 5 },
   serviceTitle: { color: theme.textPrimary, fontSize: 14, fontWeight: "700" },
   serviceDescription: { color: theme.textSecondary, fontSize: 12, lineHeight: 18 },
   servicePrice: { color: theme.accent, fontSize: 12, fontWeight: "800" },
@@ -653,7 +654,7 @@ const getStyles = (theme: any, narrow: boolean) => StyleSheet.create({
   secondaryButton: { backgroundColor: theme.accent, borderRadius: 8, paddingHorizontal: 18, paddingVertical: 10 },
   secondaryButtonText: { color: "#FFFFFF", fontWeight: "700" },
   viewerOverlay: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.95)", justifyContent: "center", alignItems: "center" },
-  viewerCloseButton: { position: "absolute", top: 40, right: 30, zIndex: 10, padding: 10, backgroundColor: "rgba(255, 255, 255, 0.15)", borderRadius: 25 },
+  viewerCloseButton: { position: "absolute", top: narrow ? 18 : 40, right: narrow ? 14 : 30, zIndex: 10, padding: 10, backgroundColor: "rgba(255, 255, 255, 0.15)", borderRadius: 25 },
   viewerImage: { width: "90%", height: "85%", resizeMode: "contain" },
   viewerErrorBox: { width: "90%", maxWidth: 480, alignItems: "center", gap: 16, padding: 24 },
   viewerErrorText: { color: "#FFFFFF", fontSize: 14, lineHeight: 22, textAlign: "center" },

@@ -7,6 +7,7 @@ import { useTheme } from '../../../components/context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Header from '../../../components/Header';
 import Sidebar from '../../../components/Sidebar';
+import { DESKTOP_BREAKPOINT } from '../../../constants/responsive';
 
 
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
@@ -448,9 +449,9 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
   const podeNegociar = artista?.aceitaNegociar === true || valorBase <= 0;
 
   const { width } = useWindowDimensions();
-  const showSidebar = width >= 900;
+  const showSidebar = width >= DESKTOP_BREAKPOINT;
   const narrow = width < 620;
-  const twoCols = width >= 700; // formulário em 2 colunas
+  const twoCols = width >= 900; // formulário em 2 colunas
 
   const [form, setForm] = useState<FormState>(FORM_INICIAL);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -886,7 +887,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
       <View style={{ flex: 1 }}>
         <Header />
 
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: narrow ? 14 : 24 }]} keyboardShouldPersistTaps="handled">
           {/* Título */}
           <View style={[styles.row, styles.contractHero, { backgroundColor: theme.heroBg || theme.textPrimary }, { justifyContent: 'space-between', marginBottom: 18, alignItems: narrow ? 'flex-start' : 'center', flexDirection: narrow ? 'column' : 'row', gap: narrow ? 12 : 0 }]}>
             <View style={{ flex: 1 }}>
@@ -921,7 +922,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
           </View>
 
           {/* Card */}
-          <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.borderColor, borderLeftColor: theme.accent }]}>
+          <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.borderColor, borderLeftColor: theme.accent }, narrow && { padding: 16 }]}>
             <View style={twoCols ? styles.rowTop : undefined}>
               {colunaDados}
               {colunaValor}
@@ -929,14 +930,14 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
 
             <View style={[styles.footerLine, { backgroundColor: theme.borderColor }]} />
 
-            <View style={styles.footer}>
+            <View style={[styles.footer, narrow && { flexDirection: 'column', alignItems: 'stretch', gap: 10 }]}>
               <Text style={[styles.totalLabel, { color: theme.textSecondary }]}>
                 {negociando ? 'Sua proposta' : 'Total'}
               </Text>
               <Text style={[styles.totalValue, { color: theme.accent }]}>{formatBRL(total)}</Text>
 
               <TouchableOpacity
-                style={[styles.btn, { backgroundColor: theme.searchBg, marginLeft: 16 }]}
+                style={[styles.btn, { backgroundColor: theme.searchBg, marginLeft: narrow ? 0 : 16 }]}
                 onPress={voltar}
                 disabled={enviando}
                 accessibilityRole="button"
@@ -947,7 +948,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
               <TouchableOpacity
                 style={[
                   styles.btn,
-                  { backgroundColor: theme.accent, marginLeft: 10, opacity: enviando ? 0.6 : 1 },
+                  { backgroundColor: theme.accent, marginLeft: narrow ? 0 : 10, opacity: enviando ? 0.6 : 1 },
                 ]}
                 onPress={enviar}
                 disabled={enviando}
@@ -974,7 +975,7 @@ const serif = Platform.select({ ios: 'Georgia', android: 'serif', default: 'Geor
 
 const styles = StyleSheet.create({
   
-  root: { flex: 1, flexDirection: 'row' },
+  root: { flex: 1, minWidth: 0, flexDirection: 'row' },
 
   
   // Conteúdo

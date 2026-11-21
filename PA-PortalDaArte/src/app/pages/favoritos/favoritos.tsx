@@ -22,6 +22,7 @@ import {
 // Importações dos Componentes e do Contexto
 import Header from "../../../components/Header";
 import Sidebar from "../../../components/Sidebar";
+import { DESKTOP_BREAKPOINT, SMALL_PHONE_BREAKPOINT } from "../../../constants/responsive";
 import { useTheme } from "../../../components/context/ThemeContext";
 import { useFavorites } from "../../../components/context/FavoritesContext";
 import { DISCOVER_ROUTE } from "../../../constants/auth-routes";
@@ -64,8 +65,9 @@ const formatPrice = (value: number) => `R$ ${Number(value).toLocaleString("pt-BR
 export default function IndexScreen() {
   const { theme, isLightMode } = useTheme();
   const { width } = useWindowDimensions();
-  const compact = width < 900;
-  const styles = getStyles(theme, compact);
+  const compact = width < DESKTOP_BREAKPOINT;
+  const smallPhone = width < SMALL_PHONE_BREAKPOINT;
+  const styles = getStyles(theme, compact, smallPhone);
   const router = useRouter();
   const { favoriteArtists, isHydrated, removeFavorite } = useFavorites();
 
@@ -243,15 +245,14 @@ export default function IndexScreen() {
   );
 }
 
-const getStyles = (theme: any, compact: boolean) =>
+const getStyles = (theme: any, compact: boolean, smallPhone: boolean) =>
   StyleSheet.create({
     container: {
       flex: 1,
       backgroundColor: theme.mainBg,
       ...(Platform.select({
         web: {
-          height: "100vh" as any,
-          overflow: "hidden",
+          ...(compact ? { minHeight: "100dvh" as any } : { height: "100vh" as any, overflow: "hidden" }),
         },
       }) as any),
     },
@@ -261,8 +262,7 @@ const getStyles = (theme: any, compact: boolean) =>
       backgroundColor: theme.mainBg,
       ...(Platform.select({
         web: {
-          height: "100vh" as any,
-          overflow: "hidden",
+          ...(compact ? { minHeight: "100dvh" as any } : { height: "100vh" as any, overflow: "hidden" }),
         },
       }) as any),
     },
@@ -270,12 +270,9 @@ const getStyles = (theme: any, compact: boolean) =>
       flex: 1,
       backgroundColor: theme.mainBg,
       ...(Platform.select({
-        web: {
-          height: "100vh" as any,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        },
+        web: compact
+          ? { minHeight: 0, display: "flex", flexDirection: "column" }
+          : { height: "100vh" as any, display: "flex", flexDirection: "column", overflow: "hidden" },
       }) as any),
     },
     scrollView: {
@@ -292,7 +289,10 @@ const getStyles = (theme: any, compact: boolean) =>
     },
     contentWrapper: {
       flex: 1,
-      paddingHorizontal: compact ? 18 : 32,
+      width: "100%",
+      maxWidth: 1120,
+      alignSelf: "center",
+      paddingHorizontal: smallPhone ? 14 : compact ? 18 : 32,
       paddingTop: compact ? 20 : 24,
       paddingBottom: 24,
     },
@@ -314,7 +314,7 @@ const getStyles = (theme: any, compact: boolean) =>
     },
     collectionEyebrow: { color: theme.artGold || theme.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1.4, marginBottom: 5 },
     pageTitle: {
-      fontSize: compact ? 24 : 29,
+      fontSize: smallPhone ? 21 : compact ? 24 : 29,
       lineHeight: compact ? 29 : 34,
       fontWeight: '900',
       color: theme.heroText || '#FFFFFF',
@@ -383,13 +383,13 @@ const getStyles = (theme: any, compact: boolean) =>
     },
     cardLeftGroup: {
       flexDirection: "row",
-      alignItems: "center",
+      alignItems: smallPhone ? "flex-start" : "center",
       flex: 1,
       minWidth: 0,
     },
     avatarContainer: {
-      width: 58,
-      height: 58,
+      width: smallPhone ? 50 : 58,
+      height: smallPhone ? 50 : 58,
       borderRadius: 18,
       alignItems: "center",
       justifyContent: "center",
@@ -406,7 +406,7 @@ const getStyles = (theme: any, compact: boolean) =>
       minWidth: 0,
     },
     artistName: {
-      fontSize: 18,
+      fontSize: smallPhone ? 16 : 18,
       fontWeight: "900",
       fontFamily: 'serif',
       color: theme.textPrimary,

@@ -16,6 +16,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import CardContratacao, { type Contratacao } from '../../../components/contratacoes/CardContratacao';
 import Header from '../../../components/Header';
 import Sidebar from '../../../components/Sidebar';
+import { DESKTOP_BREAKPOINT, SMALL_PHONE_BREAKPOINT } from '../../../constants/responsive';
 import { useTheme } from '../../../components/context/ThemeContext';
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
 import {
@@ -59,8 +60,9 @@ export default function ContratacoesScreen() {
   const router = useRouter();
   const { theme, isLightMode } = useTheme();
   const { width } = useWindowDimensions();
-  const compact = width < 900;
-  const styles = getStyles(theme, compact);
+  const compact = width < DESKTOP_BREAKPOINT;
+  const narrow = width < SMALL_PHONE_BREAKPOINT;
+  const styles = getStyles(theme, compact, narrow);
   const [items, setItems] = useState<PropostaApi[]>([]);
   const [filtro, setFiltro] = useState<Filtro>('Todas');
   const [loading, setLoading] = useState(true);
@@ -177,24 +179,25 @@ export default function ContratacoesScreen() {
   );
 }
 
-const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
+const getStyles = (theme: any, compact: boolean, narrow: boolean) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.mainBg,
-    ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }),
+    ...Platform.select({ web: compact ? { minHeight: '100dvh' as any } : { height: '100vh' as any, overflow: 'hidden' } }),
   },
   dashboardContainer: { flex: 1, flexDirection: 'row', backgroundColor: theme.mainBg },
   mainContent: {
     flex: 1,
     backgroundColor: theme.mainBg,
-    ...Platform.select({ web: { height: '100vh' as any, display: 'flex', flexDirection: 'column', overflow: 'hidden' } }),
+    minWidth: 0,
+    ...Platform.select({ web: compact ? { minHeight: 0 } : { height: '100vh' as any, display: 'flex', flexDirection: 'column', overflow: 'hidden' } }),
   },
   scrollView: { flex: 1 },
   scrollContentContainer: { flexGrow: 1 },
-  contentWrapper: { flex: 1, width: '100%', maxWidth: 1080, alignSelf: 'center', paddingHorizontal: compact ? 18 : 32, paddingTop: compact ? 20 : 28, paddingBottom: 32 },
+  contentWrapper: { flex: 1, width: '100%', maxWidth: 1080, alignSelf: 'center', paddingHorizontal: narrow ? 14 : compact ? 18 : 32, paddingTop: compact ? 20 : 28, paddingBottom: 32 },
   pageHeader: {
     marginBottom: 22, backgroundColor: theme.heroBg || theme.textPrimary, borderRadius: 24,
-    padding: compact ? 18 : 24, flexDirection: 'row', alignItems: 'center', gap: 16, overflow: 'hidden',
+    padding: compact ? 18 : 24, flexDirection: narrow ? 'column' : 'row', alignItems: narrow ? 'flex-start' : 'center', gap: 16, overflow: 'hidden',
     ...Platform.select({ web: { boxShadow: `0 16px 38px ${theme.shadowStrong || theme.shadowColor}` } }),
   },
   headerIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.accent, transform: [{ rotate: '-4deg' }] },

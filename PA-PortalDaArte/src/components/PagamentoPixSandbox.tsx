@@ -1,7 +1,7 @@
 import { VLibrasText as Text } from './accessibility/VLibrasText';
 import { AccessibleTextInput as TextInput } from './accessibility/AccessibleTextInput';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, TouchableOpacity, View, Linking } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, TouchableOpacity, View, Linking, useWindowDimensions } from 'react-native';
 import { useTheme } from './context/ThemeContext';
 import { apiFetch } from '../app/services/api';
 
@@ -28,6 +28,8 @@ type Props = { contratoInicial?: string; modoTeste?: boolean };
 
 export default function PagamentoPixSandbox({ contratoInicial = '', modoTeste = false }: Props) {
   const { theme } = useTheme();
+  const { width } = useWindowDimensions();
+  const compact = width < 768;
   const [usuarioId, setUsuarioId] = useState<number | null>(null);
   const [contratos, setContratos] = useState<Contrato[]>([]);
   const [contratoId, setContratoId] = useState(contratoInicial);
@@ -140,7 +142,7 @@ export default function PagamentoPixSandbox({ contratoInicial = '', modoTeste = 
   const podePagar = previa?.contrato_id === Number(contratoId) && previa?.status_contrato === 'ativo' &&
     souContratante && previa.ambos_aceitaram && previa.carteira_vinculada && config?.chave_asaas_configurada;
 
-  return <ScrollView contentContainerStyle={{ padding: 22, paddingBottom: 65 }}>
+  return <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: compact ? 14 : 22, paddingTop: compact ? 18 : 22, paddingBottom: 65, width: '100%', maxWidth: 980, alignSelf: 'center' }}>
     <Text style={[styles.titulo, { color: cor }]}>{modoTeste ? 'Laboratório ASAAS Sandbox' : 'Pagamento da contratação'}</Text>
     <Text style={{ color: secundario, marginTop: 5 }}>
       PIX com split • Comissão de 10% sobre serviço + tarifa estimada • Ambiente de testes
@@ -221,7 +223,7 @@ export default function PagamentoPixSandbox({ contratoInicial = '', modoTeste = 
         {nota?.status === 'AUTHORIZED' && !!nota.xml_url && botao('Abrir XML da nota', ()=>Linking.openURL(nota.xml_url))}
       </>}
       {!!qr?.encodedImage && <Image source={{ uri: `data:image/png;base64,${qr.encodedImage}` }}
-        style={{ width: 230, height: 230, marginTop: 15 }} />}
+        style={{ width: Math.min(230, Math.max(160, width - 110)), height: Math.min(230, Math.max(160, width - 110)), marginTop: 15 }} />}
       {!!qr?.payload && <Text selectable style={{ color: cor, marginTop: 9 }}>
         PIX copia e cola: {qr.payload}
       </Text>}

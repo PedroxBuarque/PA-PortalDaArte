@@ -5,6 +5,7 @@ import {
   Modal,
   Platform,
   StyleSheet,
+  ScrollView,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -33,6 +34,7 @@ import { useCart } from './context/CartContext';
 import { buildLoginHref, CART_ROUTE, DISCOVER_ROUTE, normalizePath, SETTINGS_ROUTE } from '../constants/auth-routes';
 import { PRIMARY_NAV_ITEMS, SETTINGS_NAV_ITEM } from '../constants/navigation';
 import BrandMark from './BrandMark';
+import { DESKTOP_BREAKPOINT, SMALL_PHONE_BREAKPOINT } from '../constants/responsive';
 
 export default function Header() {
   const [isMenuVisible, setIsMenuVisible] = useState(false);
@@ -44,7 +46,8 @@ export default function Header() {
   const [profileImage, setProfileImage] = useState<string | null>(null);
 
   const { width } = useWindowDimensions();
-  const compact = width < 900;
+  const compact = width < DESKTOP_BREAKPOINT;
+  const smallPhone = width < SMALL_PHONE_BREAKPOINT;
   const { query: searchText, setQuery: setSearchText } = useSearch();
   const { status, signOut } = useAuth();
   const { count: cartCount } = useCart();
@@ -54,7 +57,7 @@ export default function Header() {
   const pathname = usePathname();
   const URL_API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000';
   const { isLightMode, toggleTheme, theme } = useTheme();
-  const styles = getStyles(theme, compact);
+  const styles = getStyles(theme, compact, smallPhone);
 
   const isActive = (item: { id: string; route: string }) =>
     pathname === item.route || pathname.includes(item.id);
@@ -322,6 +325,7 @@ export default function Header() {
               </TouchableOpacity>
             </View>
 
+            <ScrollView style={styles.drawerScroll} contentContainerStyle={styles.drawerScrollContent} showsVerticalScrollIndicator={false}>
             <View style={styles.drawerList}>
               {PRIMARY_NAV_ITEMS.map((item) => {
                 const Icon = item.icon;
@@ -360,6 +364,7 @@ export default function Header() {
               </View>
               <Text style={styles.drawerItemText}>Configurações</Text>
             </TouchableOpacity>
+            </ScrollView>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -466,7 +471,7 @@ export default function Header() {
   );
 }
 
-const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
+const getStyles = (theme: any, compact: boolean, smallPhone: boolean) => StyleSheet.create({
   header: {
     minHeight: 72,
     backgroundColor: theme.headerBg,
@@ -481,6 +486,7 @@ const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
   headerCompact: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12, gap: 9 },
   topRow: {
     flexDirection: 'row',
+    flexWrap: smallPhone ? 'wrap' : 'nowrap',
     alignItems: 'center',
     width: '100%',
     gap: 15,
@@ -489,7 +495,7 @@ const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
     paddingVertical: 0,
     paddingHorizontal: 0,
   },
-  brandSlot: { flexShrink: 0, minWidth: compact ? 0 : 220, marginRight: compact ? 'auto' : 8 },
+  brandSlot: { flexShrink: 1, minWidth: 0, maxWidth: '100%', marginRight: compact ? 'auto' : 8 },
   searchBar: {
     flex: 1,
     maxWidth: 640,
@@ -505,7 +511,7 @@ const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
   },
   searchBarCompact: { width: '100%', maxWidth: '100%', minWidth: 0, height: 46, marginTop: 1 },
   searchInput: { flex: 1, marginLeft: 9, color: theme.textPrimary, fontSize: 13, minWidth: 0 },
-  rightIcons: { flexDirection: 'row', alignItems: 'center', gap: 7, marginLeft: 'auto' },
+  rightIcons: { flexDirection: 'row', alignItems: 'center', justifyContent: smallPhone ? 'space-between' : 'flex-end', width: smallPhone ? '100%' : undefined, gap: 7, marginLeft: smallPhone ? 0 : 'auto', minWidth: 0 },
   iconButton: {
     width: 40,
     height: 40,
@@ -547,7 +553,7 @@ const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
   },
   dropdownMenu: {
     position: 'absolute',
-    top: compact ? 118 : 66,
+    top: smallPhone ? 180 : compact ? 118 : 66,
     right: compact ? 14 : 72,
     width: compact ? undefined : 240,
     left: compact ? 14 : undefined,
@@ -564,7 +570,7 @@ const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
   },
   notificationsMenu: { width: compact ? undefined : 340, maxWidth: compact ? undefined : 360, right: compact ? 14 : 118 },
   accountMenu: {
-    position: 'absolute', top: compact ? 118 : 66, right: compact ? 14 : 26,
+    position: 'absolute', top: smallPhone ? 180 : compact ? 118 : 66, right: compact ? 14 : 26,
     width: compact ? 210 : 220, backgroundColor: theme.cardBg, borderRadius: 14,
     paddingVertical: 7, borderWidth: 1, borderColor: theme.borderColor,
     ...Platform.select({ web: { boxShadow: `0 16px 38px ${theme.shadowColor || 'rgba(0,0,0,0.16)'}` }, default: { elevation: 12 } }),
@@ -608,6 +614,8 @@ const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
   drawerHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 5, marginBottom: 24 },
   drawerTitle: { color: theme.sidebarText || theme.textPrimary, fontSize: 22, fontWeight: '900', fontFamily: 'serif' },
   drawerSubtitle: { color: theme.sidebarMuted || theme.textSecondary, fontSize: 11, marginTop: 2 },
+  drawerScroll: { flex: 1, minHeight: 0 },
+  drawerScrollContent: { flexGrow: 1, paddingBottom: 16 },
   drawerList: { gap: 6 },
   drawerItem: {
     minHeight: 50, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9,

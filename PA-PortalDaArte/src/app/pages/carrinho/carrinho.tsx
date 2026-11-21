@@ -17,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import Header from '../../../components/Header';
 import Sidebar from '../../../components/Sidebar';
+import { DESKTOP_BREAKPOINT, SMALL_PHONE_BREAKPOINT } from '../../../constants/responsive';
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
 import { useCart, type CartItem } from '../../../components/context/CartContext';
 import { useAuth } from '../../../components/context/AuthContext';
@@ -40,7 +41,8 @@ async function confirmAction(title: string, message: string) {
 export default function CarrinhoScreen() {
   const { theme, isLightMode } = useTheme();
   const { width } = useWindowDimensions();
-  const compact = width < 900;
+  const compact = width < DESKTOP_BREAKPOINT;
+  const narrowPhone = width < SMALL_PHONE_BREAKPOINT;
   const { status } = useAuth();
   const authenticated = status === 'authenticated';
   const { items, total, count, removeItem, restoreItem, clearCart, hydrated } = useCart();
@@ -50,7 +52,7 @@ export default function CarrinhoScreen() {
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [orderState, setOrderState] = useState<string>('');
   const autoCheckoutStarted = useRef(false);
-  const styles = getStyles(theme, compact);
+  const styles = getStyles(theme, compact, narrowPhone);
 
   const checkoutParam = Array.isArray(params.checkout) ? params.checkout[0] : params.checkout;
   const orderParam = Array.isArray(params.pedido) ? params.pedido[0] : params.pedido;
@@ -278,7 +280,7 @@ export default function CarrinhoScreen() {
   );
 }
 
-const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
+const getStyles = (theme: any, compact: boolean, narrowPhone: boolean) => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.mainBg },
   dashboard: { flex: 1, flexDirection: 'row', backgroundColor: theme.mainBg },
   rightArea: { flex: 1, minWidth: 0 },
@@ -292,7 +294,7 @@ const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
     overflow: 'hidden', ...Platform.select({ web: { boxShadow: `0 18px 46px ${theme.shadowStrong || theme.shadowColor}` } }),
   },
   heroIcon: { width: 52, height: 52, borderRadius: 17, backgroundColor: theme.accent, alignItems: 'center', justifyContent: 'center' },
-  heroCopy: { flex: 1, maxWidth: 680 },
+  heroCopy: { flexGrow: 1, flexShrink: 1, minWidth: 0, maxWidth: 680 },
   eyebrow: { color: theme.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1.7, marginBottom: 7 },
   title: { color: theme.heroText || '#FFFFFF', fontSize: compact ? 27 : 34, lineHeight: compact ? 32 : 39, fontFamily: 'serif', fontWeight: '900', letterSpacing: -0.7 },
   subtitle: { color: theme.heroMuted || '#E6D8CF', fontSize: 13, lineHeight: 20, marginTop: 8, maxWidth: 610 },
@@ -313,7 +315,7 @@ const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
   clearButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 11 },
   clearButtonText: { color: theme.danger || '#B42318', fontSize: 11, fontWeight: '800' },
   itemsList: { gap: 11 },
-  itemCard: { backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 20, padding: compact ? 14 : 17, flexDirection: 'row', alignItems: 'center', gap: 13, ...Platform.select({ web: { boxShadow: `0 8px 24px ${theme.shadowColor}` } }) },
+  itemCard: { backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 20, padding: compact ? 14 : 17, flexDirection: narrowPhone ? 'column' : 'row', alignItems: narrowPhone ? 'stretch' : 'center', gap: 13, ...Platform.select({ web: { boxShadow: `0 8px 24px ${theme.shadowColor}` } }) },
   serviceAvatar: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.accentSoft || theme.menuActiveBg, borderWidth: 1, borderColor: theme.borderColor },
   serviceAvatarText: { color: theme.accent, fontSize: 19, fontFamily: 'serif', fontWeight: '900' },
   itemCopy: { flex: 1, minWidth: 0 },
@@ -321,17 +323,17 @@ const getStyles = (theme: any, compact: boolean) => StyleSheet.create({
   itemTitle: { color: theme.textPrimary, fontSize: 15, fontWeight: '800', marginTop: 3 },
   itemDescription: { color: theme.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 4 },
   itemMeta: { color: theme.accent, fontSize: 10, fontWeight: '700', marginTop: 5 },
-  itemRight: { alignItems: 'flex-end', gap: 9 },
+  itemRight: { alignItems: 'flex-end', width: narrowPhone ? '100%' : undefined, flexDirection: narrowPhone ? 'row' : 'column', justifyContent: narrowPhone ? 'space-between' : 'center', gap: 9 },
   itemPrice: { color: theme.textPrimary, fontSize: compact ? 13 : 15, fontWeight: '900' },
   removeButton: { width: 37, height: 37, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.surfaceMuted || theme.mainBg },
   summaryCard: { width: compact ? '100%' : 330, flexShrink: 0, backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 24, padding: 20, ...Platform.select({ web: { boxShadow: `0 14px 34px ${theme.shadowColor}` } }) },
   summaryEyebrow: { color: theme.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1.5 },
   summaryTitle: { color: theme.textPrimary, fontSize: 20, fontFamily: 'serif', fontWeight: '900', marginTop: 5, marginBottom: 18 },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  summaryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   summaryLabel: { color: theme.textSecondary, fontSize: 12 },
   summaryValue: { color: theme.textPrimary, fontSize: 12, fontWeight: '800' },
   summaryDivider: { height: StyleSheet.hairlineWidth, backgroundColor: theme.borderColor, marginVertical: 8 },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 5 },
+  totalRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', alignItems: 'baseline', marginTop: 5 },
   totalLabel: { color: theme.textPrimary, fontSize: 14, fontWeight: '800' },
   totalValue: { color: theme.accent, fontSize: 23, fontFamily: 'serif', fontWeight: '900' },
   summaryHelp: { color: theme.textSecondary, fontSize: 10, lineHeight: 15, marginTop: 10, marginBottom: 16 },

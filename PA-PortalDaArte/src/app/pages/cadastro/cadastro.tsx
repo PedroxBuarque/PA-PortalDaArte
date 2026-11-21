@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { MOBILE_BREAKPOINT } from '../../../constants/responsive';
 import { AccessibleTextInput as TextInput } from '../../../components/accessibility/AccessibleTextInput';
 import { router, useLocalSearchParams } from "expo-router";
 import { Lock } from "lucide-react-native";
@@ -16,7 +17,7 @@ export default function RegisterScreen() {
   const { theme } = useTheme();
   const { highContrast } = useAccessibility();
   const { width } = useWindowDimensions();
-  const compact = width < 620;
+  const compact = width < MOBILE_BREAKPOINT;
   const styles = getStyles(theme, highContrast, compact);
 
   // O cadastro não faz login automático: o destino pretendido segue junto até o login.
@@ -228,6 +229,7 @@ export default function RegisterScreen() {
 
         <ScrollView
           contentContainerStyle={styles.scrollContainer}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.registerCard}>
@@ -433,7 +435,7 @@ export default function RegisterScreen() {
 
 const getStyles = (theme: any, highContrast: boolean, compact: boolean) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: theme.mainBg },
-  container: { flex: 1, backgroundColor: theme.mainBg, overflow: "hidden", ...Platform.select({ web: { minHeight: "100vh" as any } }) },
+  container: { flex: 1, backgroundColor: theme.mainBg, overflow: "hidden", ...Platform.select({ web: { minHeight: "100dvh" as any } }) },
   scrollContainer: { flexGrow: 1, justifyContent: "center", alignItems: "center", padding: compact ? 14 : 20 },
   circleTopLeft: { position: "absolute", width: 320, height: 320, borderRadius: 160, backgroundColor: highContrast ? "transparent" : (theme.accentSoft || theme.surfaceMuted), top: -100, left: -80, opacity: highContrast ? 0 : 0.9 },
   circleTopRight: { position: "absolute", width: 380, height: 380, borderRadius: 190, backgroundColor: highContrast ? "transparent" : (theme.surfaceMuted || theme.accentSoft), top: -60, right: -90, opacity: highContrast ? 0 : 0.78 },

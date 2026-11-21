@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, SafeAreaView, StyleSheet, type TextInputProps, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, SafeAreaView, ScrollView, StyleSheet, type TextInputProps, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { AccessibleTextInput as TextInput } from '../../../components/accessibility/AccessibleTextInput';
 import { router, useLocalSearchParams, useNavigationContainerRef } from "expo-router";
 import Head from "expo-router/head";
@@ -324,6 +324,7 @@ export default function LoginScreen() {
           <View style={styles.circleTopRight} />
           <View style={styles.circleBottomRight} />
 
+          <ScrollView style={styles.authScroll} contentContainerStyle={styles.authScrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.loginCard}>
             <View style={styles.authBrand}><BrandMark showTagline={false} /></View>
             <TouchableOpacity onPress={closeRecovery} disabled={isSubmittingRecovery} style={styles.backButton}
@@ -401,6 +402,7 @@ export default function LoginScreen() {
               </TouchableOpacity>
             )}
           </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     );
@@ -418,6 +420,7 @@ export default function LoginScreen() {
           <View style={styles.circleTopRight} />
           <View style={styles.circleBottomRight} />
 
+          <ScrollView style={styles.authScroll} contentContainerStyle={styles.authScrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.loginCard}>
             <View style={styles.authBrand}><BrandMark showTagline={false} /></View>
             <TouchableOpacity onPress={closeRecovery} disabled={isSubmittingRecovery} style={styles.backButton}
@@ -485,6 +488,7 @@ export default function LoginScreen() {
               </TouchableOpacity>
             ) : null}
           </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     );
@@ -501,6 +505,7 @@ export default function LoginScreen() {
         <View style={styles.circleTopRight} />
         <View style={styles.circleBottomRight} />
 
+        <ScrollView style={styles.authScroll} contentContainerStyle={styles.authScrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={styles.loginCard}>
           <View style={styles.authBrand}><BrandMark showTagline={false} /></View>
           <Text style={styles.title}>Entrar no Portal da Arte</Text>
@@ -587,6 +592,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
         </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -617,6 +623,8 @@ const getStyles = (theme: any, highContrast: boolean, compact: boolean) => Style
     backgroundColor: highContrast ? "transparent" : (theme.accentSoft || theme.surfaceMuted),
     bottom: -120, right: -90, opacity: highContrast ? 0 : 0.72,
   },
+  authScroll: { flex: 1, width: "100%" },
+  authScrollContent: { flexGrow: 1, justifyContent: "center", alignItems: "center", paddingVertical: 12 },
   loginCard: {
     width: "100%", maxWidth: 440, backgroundColor: theme.cardBg,
     borderWidth: highContrast ? 2 : 1, borderColor: theme.borderColor,

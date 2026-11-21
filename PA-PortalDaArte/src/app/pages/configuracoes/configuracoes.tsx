@@ -13,6 +13,7 @@ import {
 import { Accessibility, AlignLeft, Eye, RotateCcw, Sparkles, Type } from 'lucide-react-native';
 import Header from '../../../components/Header';
 import Sidebar from '../../../components/Sidebar';
+import { DESKTOP_BREAKPOINT, MOBILE_BREAKPOINT } from '../../../constants/responsive';
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
 import {
   FONT_SCALE_OPTIONS,
@@ -45,8 +46,8 @@ export default function ConfiguracoesScreen() {
     resetAccessibility,
   } = useAccessibility();
 
-  const showSidebar = status === 'authenticated' && width >= 900;
-  const styles = getStyles(theme, width < 720);
+  const showSidebar = status === 'authenticated' && width >= DESKTOP_BREAKPOINT;
+  const styles = getStyles(theme, width < MOBILE_BREAKPOINT);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -244,7 +245,7 @@ const getStyles = (theme: any, compact: boolean) =>
     container: {
       flex: 1,
       backgroundColor: theme.mainBg,
-      ...Platform.select({ web: { height: '100vh' as any, overflow: 'hidden' } }),
+      ...Platform.select({ web: compact ? { minHeight: '100dvh' as any } : { height: '100vh' as any, overflow: 'hidden' } }),
     },
     dashboardContainer: { flex: 1, flexDirection: 'row', backgroundColor: theme.mainBg },
     mainContent: { flex: 1, minWidth: 0, backgroundColor: theme.mainBg },
@@ -271,7 +272,7 @@ const getStyles = (theme: any, compact: boolean) =>
     settingsHeroEyebrow: { color: theme.artGold || theme.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1.5 },
     settingsHeroTitle: { color: theme.heroText || '#FFFFFF', fontFamily: 'serif', fontSize: compact ? 27 : 31, lineHeight: compact ? 32 : 37, fontWeight: '900', letterSpacing: -0.6, maxWidth: 670 },
     settingsHeroText: { color: theme.heroMuted || '#E6D8CF', fontSize: 12.5, lineHeight: 19, marginTop: 10, maxWidth: 620 },
-    tabs: { alignSelf: 'flex-start', flexDirection: 'row', backgroundColor: theme.surfaceMuted || theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 16, padding: 5, marginBottom: 22 },
+    tabs: { alignSelf: 'flex-start', maxWidth: '100%', flexWrap: 'wrap', flexDirection: 'row', backgroundColor: theme.surfaceMuted || theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderRadius: 16, padding: 5, marginBottom: 22 },
     activeTab: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, ...Platform.select({ web: { boxShadow: `0 6px 16px ${theme.shadowColor}` } }) },
     activeTabText: { color: theme.accent, fontSize: 14, fontWeight: '700' },
     card: { backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.borderColor, borderLeftWidth: 4, borderLeftColor: theme.accent, borderRadius: 20, padding: compact ? 18 : 22, marginBottom: 16, ...Platform.select({ web: { boxShadow: `0 10px 28px ${theme.shadowColor || 'rgba(0,0,0,0.05)'}` } }) },
