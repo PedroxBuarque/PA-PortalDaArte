@@ -35,8 +35,8 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 import bcrypt
 from ia import (
-    IAError, busca_fallback, interpretar_busca,
-    sugerir_descricao_servico, sugerir_respostas,
+    IAError, busca_fallback, interpretar_busca, moderar_texto, recomendar_artistas,
+    resumir_conversa, sugerir_descricao_servico, sugerir_proposta, sugerir_respostas,
 )
 
 # Configuração ao lado da API; aceita BOM do Windows e preserva variáveis já exportadas.
@@ -1822,6 +1822,199 @@ def buscar_artistas_com_ia(dados: IABuscaRequest, request: Request):
     except Exception:
         logger.error("Falha na busca com IA; usando termos simples (%s).", "ia")
         return busca_fallback(dados.consulta)
+    finally:
+        if cursor:
+            cursor.close()
+        if conexao:
+            conexao.close()
+
+
+class IAModeracaoRequest(BaseModel):
+    texto: str = Field(..., min_length=1, max_length=2000)
+    contexto: str = Field("mensagem", max_length=30)
+    referencia_id: Optional[int] = Field(None, gt=0)
+
+
+@app.post("/api/ia/moderar-texto", tags=["IA"])
+def moderar_texto_endpoint(
+    dados: IAModeracaoRequest,
+    current_user: dict = Depends(get_usuario_atual),
+):
+    """Aviso consultivo: nunca impede o envio. Suspeitos ficam registrados para revisão."""
+    resultado = moderar_texto(dados.texto)
+    if resultado.get("suspeito"):
+        conexao = None
+        cursor = None
+        try:
+            conexao = get_db_connection()
+            cursor = conexao.cursor()
+            cursor.execute(
+                """INSERT INTO moderacao_avisos
+                   (usuario_id, contexto, referencia_id, texto_resumo, categorias_json, aviso)
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                (
+                    current_user["id"], dados.contexto[:30], dados.referencia_id,
+                    dados.texto[:500], json.dumps(resultado.get("categorias", []), ensure_ascii=False),
+                    resultado.get("aviso", "")[:500],
+                ),
+            )
+            conexao.commit()
+        except Exception:
+            logger.error("Falha ao registrar aviso de moderação (%s).", "ia")
+        finally:
+            if cursor:
+                cursor.close()
+            if conexao:
+                conexao.close()
+    return resultado
+
+
+class IARecArtista(BaseModel):
+    id: int
+    nome: str = Field("", max_length=100)
+    categorias: List[str] = Field(default_factory=list, max_length=8)
+    servicos: List[str] = Field(default_factory=list, max_length=8)
+    nota: float = 0
+    cidade: str = Field("", max_length=100)
+
+
+class IARecRequest(BaseModel):
+    artistas: List[IARecArtista] = Field(..., min_length=1, max_length=30)
+    favoritos_ids: List[int] = Field(default_factory=list, max_length=30)
+    limite: int = Field(12, ge=1, le=30)
+
+
+@app.post("/api/ia/recomendacoes", tags=["IA"])
+def recomendar_artistas_endpoint(
+    dados: IARecRequest,
+    current_user: dict = Depends(get_usuario_atual),
+):
+    """Reordena os artistas enviados pelo app; não grava nada no banco."""
+    try:
+        return recomendar_artistas(
+            [item.model_dump() for item in dados.artistas],
+            dados.favoritos_ids,
+            dados.limite,
+        )
+    except Exception:
+        logger.error("Falha nas recomendações (%s).", "ia")
+        raise HTTPException(status_code=503, detail="Não foi possível gerar recomendações agora.")
+
+
+class IAPropostaRequest(BaseModel):
+    artista_id: int = Field(..., gt=0)
+    servico_id: Optional[int] = Field(None, gt=0)
+    descricao_escopo: str = Field(..., min_length=10, max_length=1000)
+    local_ou_modalidade: Optional[str] = Field(None, max_length=255)
+    prazo_estimado: Optional[str] = Field(None, max_length=10)
+
+
+@app.post("/api/ia/sugerir-proposta", tags=["IA"])
+def sugerir_proposta_endpoint(
+    dados: IAPropostaRequest,
+    current_user: dict = Depends(get_usuario_atual),
+):
+    """Sugere valor/escopo consultivos; o valor enviado pelo cliente continua soberano."""
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT usuario_id, nome_artistico, nota_media, cidade_atendimento, "
+            "estado_atendimento, categoria_atuacao FROM perfis_artista WHERE usuario_id = %s",
+            (dados.artista_id,),
+        )
+        artista = cursor.fetchone()
+        if not artista:
+            raise HTTPException(status_code=404, detail="Artista não encontrado.")
+        servico = None
+        if dados.servico_id:
+            cursor.execute(
+                "SELECT id, titulo, preco_min, preco_max, modalidade FROM servicos "
+                "WHERE id = %s AND artista_id = %s AND ativo = TRUE",
+                (dados.servico_id, dados.artista_id),
+            )
+            servico = cursor.fetchone()
+        if not servico:
+            cursor.execute(
+                "SELECT id, titulo, preco_min, preco_max, modalidade FROM servicos "
+                "WHERE artista_id = %s AND ativo = TRUE ORDER BY id ASC LIMIT 1",
+                (dados.artista_id,),
+            )
+            servico = cursor.fetchone()
+        return sugerir_proposta({
+            "titulo": (servico or {}).get("titulo") or artista.get("nome_artistico") or "Serviço artístico",
+            "descricao_escopo": dados.descricao_escopo,
+            "local_ou_modalidade": dados.local_ou_modalidade,
+            "preco_min": float((servico or {}).get("preco_min")) if (servico or {}).get("preco_min") is not None else None,
+            "preco_max": float((servico or {}).get("preco_max")) if (servico or {}).get("preco_max") is not None else None,
+            "modalidade": (servico or {}).get("modalidade") or "ambos",
+            "categoria": artista.get("categoria_atuacao") or "",
+        })
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Falha ao sugerir proposta (%s).", "ia")
+        raise HTTPException(status_code=503, detail="Não foi possível sugerir a proposta agora.")
+    finally:
+        if cursor:
+            cursor.close()
+        if conexao:
+            conexao.close()
+
+
+_resumo_cache = {}
+_resumo_lock = threading.Lock()
+
+
+@app.get("/api/conversas/{conversa_id}/resumo", tags=["IA"])
+def resumir_conversa_endpoint(conversa_id: int, current_user: dict = Depends(get_usuario_atual)):
+    """Resume uma conversa sob demanda, sem enviar mídia ao provedor de IA."""
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        usuario_id = current_user["id"]
+        cursor.execute(
+            "SELECT id FROM conversas WHERE id = %s AND (contratante_id = %s OR artista_id = %s)",
+            (conversa_id, usuario_id, usuario_id),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+        cursor.execute(
+            """SELECT id, remetente_id, conteudo FROM mensagens
+               WHERE conversa_id = %s ORDER BY criado_em DESC, id DESC LIMIT 40""",
+            (conversa_id,),
+        )
+        linhas = cursor.fetchall() or []
+        ultima_id = linhas[0]["id"] if linhas else 0
+        chave = (int(usuario_id), int(conversa_id), int(ultima_id))
+        with _resumo_lock:
+            entrada = _resumo_cache.get(chave)
+            if entrada and entrada[0] > time.monotonic():
+                return entrada[1]
+        historico = []
+        for linha in reversed(linhas):
+            conteudo = linha.get("conteudo") or ""
+            midia = _decodificar_mensagem_midia(conteudo)
+            if midia:
+                conteudo = midia["caption"] or ("Vídeo" if midia["type"] == "video" else "Imagem")
+            prefixo = "Eu: " if int(linha["remetente_id"]) == int(usuario_id) else "Outra pessoa: "
+            historico.append(prefixo + conteudo)
+        resultado = resumir_conversa(historico)
+        resultado["mensagens_resumidas"] = len(historico)
+        with _resumo_lock:
+            if len(_resumo_cache) > 300:
+                _resumo_cache.clear()
+            _resumo_cache[chave] = (time.monotonic() + 300, resultado)
+        return resultado
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Falha ao resumir conversa (%s).", "ia")
+        raise HTTPException(status_code=503, detail="Não foi possível resumir a conversa agora.")
     finally:
         if cursor:
             cursor.close()

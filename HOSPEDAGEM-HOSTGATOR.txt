@@ -1,0 +1,81 @@
+PORTAL DA ARTE - HOSPEDAGEM (HostGator + IA)
+Data: 25/11/2026
+
+============================================================
+1. O QUE PODE IR NO HOSTGATOR COMPARTILHADO
+============================================================
+O frontend é um site ESTÁTICO (app.json já tem "web": { "output": "static" }).
+Para gerar os arquivos:
+
+    cd PA-PortalDaArte
+    npx expo export --platform web
+
+Os arquivos ficam em PA-PortalDaArte/dist e podem ser enviados por FTP/Files
+do cPanel para public_html (ou uma subpasta).
+
+ANTES de gerar, configure a URL da API em PA-PortalDaArte/.env:
+    EXPO_PUBLIC_API_URL=https://api.SEU-DOMINIO.com
+Depois do build, o valor fica embutido no JavaScript — trocar o .env exige
+gerar e subir o dist novamente.
+
+============================================================
+2. O QUE NÃO RODA EM COMPARTILHADO (IMPORTANTE)
+============================================================
+A API é FastAPI + Python + uvicorn (processo contínuo). Planos compartilhados
+do HostGator normalmente NÃO executam esse tipo de aplicação. O banco MySQL
+do cPanel pode até ser usado, mas a API precisa de um dos modelos abaixo:
+
+  A) HostGator VPS/Dedicated: instalar Python, rodar
+     uvicorn main:app --host 0.0.0.0 --port 8000 atrás do nginx (HTTPS).
+  B) API em PaaS (Render/Railway/Fly.io etc.) + MySQL remoto (liberar IP
+     externo no cPanel). Verificar custos e limites do plano gratuito.
+  C) Demonstração local: manter a API na sua máquina e expor com túnel HTTPS
+     (cloudflared/ngrok). Não é adequado para produção.
+
+A API e o site DEVEM usar HTTPS (mixed content é bloqueado pelo navegador).
+O CORS hoje aceita qualquer origem; em produção, restrinja allow_origins
+ao seu domínio em python-api/main.py.
+
+============================================================
+3. IA: TROCAR O OLLAMA POR API GRATUITA EM NUVEM
+============================================================
+O Ollama local é gratuito, mas exige o modelo instalado na máquina que roda a
+API — inviável no compartilhado. O código já suporta dois provedores gratuitos:
+
+Opção Gemini (recomendada):
+  - Obter chave gratuita: https://aistudio.google.com/apikey
+  - python-api/.env:
+      AI_PROVIDER=gemini
+      AI_API_KEY=SUA_CHAVE
+      AI_MODEL=gemini-2.0-flash
+      AI_TIMEOUT_SECONDS=30
+
+Opção Groq (muito rápida):
+  - Obter chave gratuita: https://console.groq.com/keys
+  - python-api/.env:
+      AI_PROVIDER=groq
+      AI_API_KEY=SUA_CHAVE
+      AI_MODEL=qwen/qwen3.8-27b
+      AI_TIMEOUT_SECONDS=30
+
+Reiniciar a API após alterar o .env. Nunca use EXPO_PUBLIC_ para essas chaves.
+Sem chave, o sistema continua funcionando com texto determinístico (fallback).
+
+============================================================
+4. DESCRIÇÃO DE SERVIÇO MAIS COMPLETA
+============================================================
+O gerador agora pede 70-100 palavras em 2 parágrafos. No Ollama local ele usa
+110 tokens e um complemento determinístico; em Gemini/Groq usa 220 tokens.
+O campo do Perfil aceita até 500 caracteres e o corte respeita palavras
+inteiras.
+
+============================================================
+5. CHECKLIST DE PUBLICACAO
+============================================================
+[ ] EXPO_PUBLIC_API_URL apontando para a API HTTPS
+[ ] npx expo export --platform web e upload do dist/
+[ ] API rodando em Python (VPS ou PaaS) com uvicorn + nginx/HTTPS
+[ ] MySQL com BD.sql + migrações (já aplicadas localmente)
+[ ] AI_PROVIDER=gemini ou groq + AI_API_KEY no .env do servidor
+[ ] CORS restrito ao domínio do site
+[ ] Copiar .env de produção com segredos (nunca comitar)

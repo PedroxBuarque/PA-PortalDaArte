@@ -63,25 +63,33 @@ Frontend:
 ============================================================
 6. IA LOCAL (FUNCIONALIDADES IMPLEMENTADAS)
 ============================================================
-Provedor: Ollama local, modelos gratuitos, sem chave de API.
-Configurado em python-api/.env:
-  AI_PROVIDER=ollama
-  OLLAMA_URL=http://127.0.0.1:11434
-  OLLAMA_MODEL=qwen3.5:4b        (qualidade; ~8-20s por descrição em CPU)
-  AI_TIMEOUT_SECONDS=60
-  AI_MAX_TOKENS=100
-Modelo rápido alternativo: qwen2.5:0.5b (~2s, porém qualidade menor).
+Provedor ATIVO: Groq (API gratuita, chave configurada em python-api/.env):
+  AI_PROVIDER=groq
+  AI_MODEL=qwen/qwen3.8-27b
+  AI_API_KEY=... (segredo; nunca vai para o frontend)
+Todas as funcoes IA respondem em ~1s. Alternativas:
+  Ollama local: AI_PROVIDER=ollama + OLLAMA_MODEL=qwen3.5:4b (~8-20s em CPU)
+  Gemini:       AI_PROVIDER=gemini + AI_API_KEY=... + AI_MODEL=gemini-2.0-flash
+Veja HOSPEDAGEM-HOSTGATOR.txt para publicacao.
 
+1) Gerador de descricao de servico (autenticado)
 Endpoint: POST /api/ia/sugerir-descricao-servico (exige login de artista).
 Onde usar no app: Perfil > Editar perfil > Serviços > campo "Descrição do
 novo serviço" > botão "Gerar descrição com IA". O texto gerado preenche o
 campo para revisão; o salvamento continua como antes.
+A descrição foi ampliada: o modelo pede 70-100 palavras em 2 parágrafos; se a
+resposta vier curta, um complemento determinístico completa o texto (limite de
+500 caracteres com corte em palavra inteira).
 
 Arquivos novos/alterados:
-  python-api/ia.py          (cliente Ollama, saneamento, fallback)
-  python-api/test_ia.py     (10 testes: endpoint, auth, sanitização, fallback)
-  python-api/main.py        (endpoint /api/ia/...)
-  PA-PortalDaArte/src/app/pages/perfil/perfil.tsx (botão na tela de Perfil)
+  python-api/ia.py          (clientes Ollama/Groq/Gemini, saneamento, fallback)
+  python-api/test_ia.py     (50 testes: endpoints, auth, sanitização, fallback,
+                             cache, rate limit, Gemini/Groq e textos longos)
+  python-api/main.py        (endpoints /api/ia/... e /api/conversas/{id}/resumo)
+  PA-PortalDaArte/src/app/pages/perfil/perfil.tsx (botão de descrição)
+  PA-PortalDaArte/src/app/pages/mensagens/mensagens.tsx (sugestões e resumo)
+  PA-PortalDaArte/src/app/pages/explorar/explorar.tsx (busca e recomendações)
+  PA-PortalDaArte/src/app/pages/contratacoes/Contratar.tsx (sugestão de proposta)
   python-api/.env e .env.example (configuração da IA)
 
 2) Sugestões de resposta no chat (autenticado)
@@ -89,6 +97,33 @@ Arquivos novos/alterados:
    Onde usar: Mensagens > abrir uma conversa > botão "Sugerir respostas" no
    cabeçalho. Aparecem 3 chips; tocar apenas preenche o campo (não envia).
    O histórico é sanitizado e mídias viram "Imagem"/"Vídeo" no prompt.
+
+4) Resumo de conversa (autenticado)
+   Endpoint: GET /api/conversas/{id}/resumo
+   Onde usar: Mensagens > abrir conversa > botão "Resumir conversa" no
+   cabeçalho. Abre um modal com até 5 tópicos (acordos, prazos, pendências).
+   Cache de 5 minutos por conversa/última mensagem; mídia vira legenda.
+
+5) Sugestao de valor e escopo da proposta (autenticado)
+   Endpoint: POST /api/ia/sugerir-proposta
+   Onde usar: Contratar > coluna "Valor" > botão "Sugerir valor e descrição
+   com IA". Preenche descrição e valor (o valor fica dentro da faixa cadastrada
+   do serviço; o cliente pode editar livremente antes de enviar).
+
+7) Moderacao consultiva (autenticada, NUNCA bloqueia)
+   Endpoint: POST /api/ia/moderar-texto { texto, contexto, referencia_id? }
+   Regras locais detectam ofensas, contato/pagamento fora da plataforma,
+   links e dados pessoais; quando ha sinal, o modelo redige um aviso curto.
+   Chat: ao enviar mensagem aparece aviso inline + janela; a mensagem SEMPRE
+   segue adiante. Contratar: aviso antes do envio da proposta, tambem sem bloquear.
+   Avisos suspeitos sao gravados em `moderacao_avisos` (ver migration abaixo)
+   para base do futuro perfil ADM.
+
+6) Recomendacoes personalizadas (autenticado)
+   Endpoint: POST /api/ia/recomendacoes
+   Onde usar: Descobrir > botão "Para você" ao lado de "Ordenar". Reordena a
+   lista por afinidade com os favoritos (categorias e nota). Toque de novo em
+   "IA: ativa" para voltar à ordenação normal.
 
 3) Busca por linguagem natural (pública, sem login)
    Endpoint: POST /api/ia/busca-artistas  { "consulta": "banda de forró para casamento" }
@@ -100,7 +135,12 @@ Segurança: CPF, e-mail, telefone e tokens são removidos dos prompts; falha do
 modelo troca por texto/filtros determinísticos (campo "origem": "fallback")
 sem quebrar a tela. Nenhuma chave de IA é enviada ao frontend.
 
-Testes: python -m unittest test_ia  (24 testes, 1 smoke opcional com IA_SMOKE=1)
+Migration aplicada: BancoDeDados/migracao_moderacao_avisos.sql
+Tabela `moderacao_avisos` pronta para o painel ADM (usuario, contexto,
+categorias, aviso, resolvido_em). As tabelas `papeis`/`usuario_papeis` do
+BD.sql já suportam o futuro controle de acesso administrativo.
+
+Testes: python -m unittest test_ia  (54 testes, 1 smoke opcional com IA_SMOKE=1)
 
 - Para abrir no celular, troque EXPO_PUBLIC_API_URL pelo IP da máquina na rede
   (neste momento: http://192.168.15.12:8000) e use o QR Code do Expo.

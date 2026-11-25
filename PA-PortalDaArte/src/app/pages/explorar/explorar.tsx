@@ -1,6 +1,7 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Image, Modal, PanResponder, Platform, SafeAreaView, ScrollView, StatusBar, StyleSheet, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { AccessibleTextInput as TextInput } from '../../../components/accessibility/AccessibleTextInput';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Header from "../../../components/Header";
 import Sidebar from "../../../components/Sidebar";
 import { useTheme } from "../../../components/context/ThemeContext";
@@ -369,6 +370,9 @@ export default function ExplorarScreen() {
   const [aiSearch, setAiSearch] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiNotice, setAiNotice] = useState("");
+  const [recIds, setRecIds] = useState<number[] | null>(null);
+  const [recomendando, setRecomendando] = useState(false);
+  const [recNotice, setRecNotice] = useState("");
 
   const showFilterSidebar = canUseFilterSidebar && filtersVisible;
   // O grid considera a largura REAL disponível depois da navegação e do painel de filtros.
@@ -615,7 +619,7 @@ export default function ExplorarScreen() {
       );
     });
 
-    return [...result].sort((a, b) => {
+    const ordenados = [...result].sort((a, b) => {
       if (sort === "priceAsc") return a.price - b.price;
       if (sort === "priceDesc") return b.price - a.price;
       if (sort === "distance") {
@@ -623,11 +627,17 @@ export default function ExplorarScreen() {
         const bDistance = Number.isFinite(b.distanceKm) ? b.distanceKm : Number.POSITIVE_INFINITY;
         return aDistance - bDistance;
       }
-      
+
       // Ordena pelas avaliações reais retornadas pela API; perfis sem avaliação ficam no fim.
       return b.rating - a.rating;
     });
-  }, [artists, searchQuery, aiSearch, activeCategory, modality, activeService, numericMin, numericMax, ratingFilter, distance, sort, location]);
+    if (recIds && recIds.length > 0) {
+      const rank = new Map(recIds.map((id, indice) => [id, indice]));
+      return [...ordenados].sort((a, b) =>
+        (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+    }
+    return ordenados;
+  }, [artists, searchQuery, aiSearch, recIds, activeCategory, modality, activeService, numericMin, numericMax, ratingFilter, distance, sort, location]);
 
   useEffect(() => {
     setVisibleCount(6);
@@ -687,6 +697,8 @@ export default function ExplorarScreen() {
     setSort("rating");
     setAiSearch(false);
     setAiNotice("");
+    setRecIds(null);
+    setRecNotice("");
   };
 
   const handleBuscarComIA = async () => {
@@ -719,6 +731,58 @@ export default function ExplorarScreen() {
       portfolioNotice("Busca com IA", erro?.message || "Não foi possível interpretar a busca.");
     } finally {
       setAiBusy(false);
+    }
+  };
+
+  const handleRecomendar = async () => {
+    if (recomendando) return;
+    if (recIds) {
+      setRecIds(null);
+      setRecNotice("");
+      return;
+    }
+    if (filteredArtists.length < 2) {
+      setRecNotice("Precisa de pelo menos 2 artistas na busca para recomendar.");
+      return;
+    }
+    setRecomendando(true);
+    setRecNotice("");
+    try {
+      const token = await AsyncStorage.getItem("access_token");
+      if (!token) {
+        requireAuth(() => handleRecomendar(), DISCOVER_ROUTE, "modal");
+        return;
+      }
+      const resposta = await fetch(`${URL_API}/api/ia/recomendacoes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          artistas: filteredArtists.slice(0, 30).map((artist) => ({
+            id: artist.id,
+            nome: artist.name.slice(0, 100),
+            categorias: artist.categories.slice(0, 6),
+            servicos: artist.serviceTitles.slice(0, 6),
+            nota: artist.rating,
+            cidade: artist.city.slice(0, 100),
+          })),
+          favoritos_ids: favoriteIds.slice(0, 30).map(Number),
+          limite: Math.min(filteredArtists.length, 30),
+        }),
+      });
+      if (!resposta.ok) {
+        const erro = await resposta.json().catch(() => ({}));
+        throw new Error(erro.detail || "Não foi possível gerar recomendações.");
+      }
+      const dados = await resposta.json();
+      if (!Array.isArray(dados.ids) || dados.ids.length < 2) {
+        throw new Error("Não foi possível ordenar os artistas.");
+      }
+      setRecIds(dados.ids.map(Number));
+      setRecNotice("Ordenado por afinidade com seus favoritos.");
+    } catch (erro: any) {
+      portfolioNotice("Recomendações", erro?.message || "Não foi possível gerar recomendações.");
+    } finally {
+      setRecomendando(false);
     }
   };
 
@@ -1168,6 +1232,19 @@ export default function ExplorarScreen() {
                     resultado{filteredArtists.length === 1 ? "" : "s"} encontrado{filteredArtists.length === 1 ? "" : "s"}
                     </Text>
                     </Text>
+
+                    <TouchableOpacity
+                    onPress={handleRecomendar}
+                    disabled={recomendando}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: recIds ? theme.accent : theme.borderColor, backgroundColor: recIds ? theme.accentSoft || theme.cardBg : 'transparent', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, opacity: recomendando ? 0.6 : 1, marginRight: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={recIds ? "Desativar recomendação por IA" : "Ordenar artistas por afinidade com meus favoritos"}
+                    >
+                    <Sparkles size={14} color={theme.accent} accessible={false} />
+                    <Text style={{ color: theme.accent, fontSize: 11, fontWeight: '700' }}>
+                    {recIds ? 'IA: ativa' : recomendando ? 'Ordenando...' : 'Para você'}
+                    </Text>
+                    </TouchableOpacity>
 
                     <View style={styles.sortWrapper}>
                     <TouchableOpacity
