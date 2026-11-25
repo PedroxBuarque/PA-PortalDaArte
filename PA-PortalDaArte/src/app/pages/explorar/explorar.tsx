@@ -14,6 +14,7 @@ import { buildCategoryOptions, categoryKey } from "../../../constants/artist-cat
 import { ArrowUpRight, ShoppingBag, SlidersHorizontal, Sparkles } from "lucide-react-native";
 
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
+import { portfolioNotice } from '../../../services/portfolio';
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 // Geocodificação de cidades para calcular distância em linha reta.
@@ -364,6 +365,10 @@ export default function ExplorarScreen() {
   const { favoriteIds, isFavorite, addFavorite, removeFavorite, whenReady } = useFavorites();
   const { addItem, hasService } = useCart();
   const [cartNotice, setCartNotice] = useState("");
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiSearch, setAiSearch] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNotice, setAiNotice] = useState("");
 
   const showFilterSidebar = canUseFilterSidebar && filtersVisible;
   // O grid considera a largura REAL disponível depois da navegação e do painel de filtros.
@@ -588,7 +593,10 @@ export default function ExplorarScreen() {
     // Cada palavra digitada precisa aparecer em nome, estilo, instrumento ou serviços (ex.: "violão forró").
     const searchTerms = foldText(searchQuery).split(/\s+/).filter(Boolean);
     const result = artists.filter((artist) => {
-      const matchesSearch = searchTerms.every((term) => artist.searchableText.includes(term));
+      // Busca com IA: qualquer termo interpretado já é suficiente; na busca comum, todos devem aparecer.
+      const matchesSearch = searchTerms.length === 0 || (aiSearch
+        ? searchTerms.some((term) => artist.searchableText.includes(term))
+        : searchTerms.every((term) => artist.searchableText.includes(term)));
       // Categoria = nome real cadastrado no Perfil (principal ou "categorias e estilos").
       const matchesCategory =
         activeCategory === ALL_CATEGORIES || artist.categoryKeys.includes(categoryKey(activeCategory));
@@ -619,7 +627,7 @@ export default function ExplorarScreen() {
       // Ordena pelas avaliações reais retornadas pela API; perfis sem avaliação ficam no fim.
       return b.rating - a.rating;
     });
-  }, [artists, searchQuery, activeCategory, modality, activeService, numericMin, numericMax, ratingFilter, distance, sort, location]);
+  }, [artists, searchQuery, aiSearch, activeCategory, modality, activeService, numericMin, numericMax, ratingFilter, distance, sort, location]);
 
   useEffect(() => {
     setVisibleCount(6);
@@ -677,6 +685,41 @@ export default function ExplorarScreen() {
     setDistance(100);
     setLocation(ALL_LOCATIONS);
     setSort("rating");
+    setAiSearch(false);
+    setAiNotice("");
+  };
+
+  const handleBuscarComIA = async () => {
+    const consulta = aiPrompt.trim();
+    if (consulta.length < 3) {
+      setAiNotice("Descreva o que procura com pelo menos 3 caracteres.");
+      return;
+    }
+    setAiBusy(true);
+    setAiNotice("");
+    try {
+      const resposta = await fetch(`${URL_API}/api/ia/busca-artistas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ consulta }),
+      });
+      if (!resposta.ok) {
+        const erro = await resposta.json().catch(() => ({}));
+        throw new Error(erro.detail || "Não foi possível interpretar a busca.");
+      }
+      const dados = await resposta.json();
+      const termos: string[] = (dados.termos || []).slice(0, 6);
+      if (termos.length === 0) throw new Error("Não consegui extrair termos da sua busca.");
+      setQuery(termos.join(" "));
+      if (dados.categoria) setCategory(dados.categoria);
+      if (dados.modalidade && dados.modalidade !== "ambos") setModality(dados.modalidade);
+      setAiSearch(true);
+      setAiNotice(`Busca interpretada: ${termos.join(", ")}.`);
+    } catch (erro: any) {
+      portfolioNotice("Busca com IA", erro?.message || "Não foi possível interpretar a busca.");
+    } finally {
+      setAiBusy(false);
+    }
   };
 
   const formatPrice = (value: number) => `R$ ${value.toLocaleString("pt-BR")}`;
@@ -1067,6 +1110,30 @@ export default function ExplorarScreen() {
                     <Text style={styles.heroDescription}>
                     Descubra artistas independentes, compare estilos e encontre a pessoa certa para transformar seu projeto em experiência.
                     </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, zIndex: 3 }}>
+                      <TextInput
+                        value={aiPrompt}
+                        onChangeText={setAiPrompt}
+                        placeholder="Descreva o que procura, ex.: banda de forró para casamento"
+                        placeholderTextColor={theme.heroMuted || "#E6D8CF"}
+                        style={{ flex: 1, minWidth: 0, backgroundColor: theme.cardBg, borderRadius: 12, borderWidth: 1, borderColor: theme.borderColor, paddingHorizontal: 12, paddingVertical: 10, color: theme.textPrimary, fontSize: 13 }}
+                        accessibilityLabel="Descreva com IA o artista que você procura"
+                        onSubmitEditing={handleBuscarComIA}
+                      />
+                      <TouchableOpacity
+                        onPress={handleBuscarComIA}
+                        disabled={aiBusy}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: theme.accent, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, opacity: aiBusy ? 0.6 : 1 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Buscar artistas com inteligência artificial"
+                      >
+                        <Sparkles size={15} color={theme.onAccent || "#FFFFFF"} accessible={false} />
+                        <Text style={{ color: theme.onAccent || "#FFFFFF", fontWeight: '700', fontSize: 12 }}>
+                          {aiBusy ? 'Buscando...' : 'Buscar com IA'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    {aiNotice ? <Text accessibilityLiveRegion="polite" style={{ color: theme.heroMuted || "#E6D8CF", fontSize: 11, marginTop: 8 }}>{aiNotice}</Text> : null}
                     </View>
                     <View style={styles.heroStat}>
                     <Text style={styles.heroStatNumber}>{filteredArtists.length}</Text>

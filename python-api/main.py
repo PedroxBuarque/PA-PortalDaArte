@@ -34,6 +34,10 @@ from portfolio_storage import (
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 import bcrypt
+from ia import (
+    IAError, busca_fallback, interpretar_busca,
+    sugerir_descricao_servico, sugerir_respostas,
+)
 
 # Configuração ao lado da API; aceita BOM do Windows e preserva variáveis já exportadas.
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"), encoding="utf-8-sig", override=False)
@@ -1688,6 +1692,141 @@ def criar_servico_artista(servico: ServicoCreate, current_user: dict = Depends(g
     finally:
         if cursor: cursor.close()
         if conexao: conexao.close()
+
+
+class IAServicoRequest(BaseModel):
+    titulo: str = Field(..., min_length=2, max_length=150)
+    categoria: Optional[str] = Field(None, max_length=100)
+    publico: Optional[str] = Field(None, max_length=150)
+    cidade: Optional[str] = Field(None, max_length=100)
+    estado: Optional[str] = Field(None, max_length=2)
+    anos_experiencia: Optional[int] = Field(None, ge=0, le=80)
+    modalidade: Optional[str] = Field("ambos", max_length=20)
+    preco_min: Optional[float] = Field(None, ge=0)
+    preco_max: Optional[float] = Field(None, ge=0)
+
+
+@app.post("/api/ia/sugerir-descricao-servico", tags=["IA"])
+def sugerir_descricao_servico_endpoint(
+    dados: IAServicoRequest,
+    current_user: dict = Depends(get_usuario_atual),
+):
+    """Sugere uma descrição para o serviço; o artista revisa antes de salvar."""
+    try:
+        return sugerir_descricao_servico(dados.model_dump())
+    except IAError:
+        logger.error("Falha ao sugerir descrição de serviço (%s).", "ia")
+        raise HTTPException(
+            status_code=503,
+            detail="Não foi possível gerar a sugestão agora. Tente novamente."
+        )
+
+
+class IASugestoesRequest(BaseModel):
+    conversa_id: int = Field(..., gt=0)
+
+
+@app.post("/api/ia/sugerir-respostas", tags=["IA"])
+def sugerir_respostas_endpoint(
+    dados: IASugestoesRequest,
+    current_user: dict = Depends(get_usuario_atual),
+):
+    """Sugere respostas curtas para a conversa; não envia mensagem automaticamente."""
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        usuario_id = current_user["id"]
+        cursor.execute(
+            "SELECT id FROM conversas WHERE id = %s AND (contratante_id = %s OR artista_id = %s)",
+            (dados.conversa_id, usuario_id, usuario_id),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+        cursor.execute(
+            """SELECT remetente_id, conteudo FROM mensagens
+               WHERE conversa_id = %s ORDER BY criado_em DESC, id DESC LIMIT 6""",
+            (dados.conversa_id,),
+        )
+        historico = []
+        for linha in reversed(cursor.fetchall() or []):
+            conteudo = linha.get("conteudo") or ""
+            midia = _decodificar_mensagem_midia(conteudo)
+            if midia:
+                conteudo = midia["caption"] or ("Vídeo" if midia["type"] == "video" else "Imagem")
+            prefixo = "Eu: " if int(linha["remetente_id"]) == int(usuario_id) else "Outra pessoa: "
+            historico.append(prefixo + conteudo)
+        return sugerir_respostas(historico)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Falha ao sugerir respostas (%s).", "ia")
+        raise HTTPException(status_code=503, detail="Não foi possível sugerir respostas agora.")
+    finally:
+        if cursor:
+            cursor.close()
+        if conexao:
+            conexao.close()
+
+
+class IABuscaRequest(BaseModel):
+    consulta: str = Field(..., min_length=3, max_length=300)
+
+
+_busca_ia_cache = {}
+_busca_ia_tentativas = {}
+_busca_ia_lock = threading.Lock()
+
+
+def limitar_busca_ia(endereco_ip):
+    """Limite simples por IP para a rota pública de IA (20 buscas/minuto)."""
+    agora = time.monotonic()
+    with _busca_ia_lock:
+        tentativas = _busca_ia_tentativas.setdefault(endereco_ip, deque())
+        while tentativas and tentativas[0] <= agora - 60:
+            tentativas.popleft()
+        if len(tentativas) >= 20:
+            raise HTTPException(status_code=429, detail="Muitas buscas com IA. Tente novamente em instantes.")
+        tentativas.append(agora)
+
+
+@app.post("/api/ia/busca-artistas", tags=["IA"])
+def buscar_artistas_com_ia(dados: IABuscaRequest, request: Request):
+    """Interpreta uma frase do visitante e devolve filtros para o Explorar."""
+    endereco_ip = request.client.host if request.client else "desconhecido"
+    limitar_busca_ia(endereco_ip)
+    chave = re.sub(r"\s+", " ", dados.consulta.strip().lower())
+    with _busca_ia_lock:
+        entrada = _busca_ia_cache.get(chave)
+        if entrada and entrada[0] > time.monotonic():
+            return entrada[1]
+
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("SELECT DISTINCT nome FROM categorias WHERE ativo = TRUE ORDER BY nome")
+        categorias = [row["nome"] for row in cursor.fetchall()]
+        cursor.execute("SELECT DISTINCT modalidade FROM servicos WHERE ativo = TRUE")
+        modalidades = [row["modalidade"] for row in cursor.fetchall()]
+        resultado = interpretar_busca(dados.consulta, categorias, modalidades)
+        with _busca_ia_lock:
+            if len(_busca_ia_cache) > 500:
+                _busca_ia_cache.clear()
+            _busca_ia_cache[chave] = (time.monotonic() + 3600, resultado)
+        return resultado
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Falha na busca com IA; usando termos simples (%s).", "ia")
+        return busca_fallback(dados.consulta)
+    finally:
+        if cursor:
+            cursor.close()
+        if conexao:
+            conexao.close()
 
 
 @app.get("/api/artistas/me/detalhes", tags=["Artista"])

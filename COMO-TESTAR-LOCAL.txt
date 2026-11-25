@@ -1,0 +1,109 @@
+PORTAL DA ARTE - AMBIENTE LOCAL DE TESTE
+Data: 25/11/2026
+
+============================================================
+1. O QUE ESTÁ RODANDO
+============================================================
+Backend (FastAPI):  http://127.0.0.1:8000
+  - Swagger/UI:      http://127.0.0.1:8000/docs
+  - Status:          GET http://127.0.0.1:8000/
+Frontend (Expo Web): http://localhost:8081
+  - A URL da API está em PA-PortalDaArte/.env (EXPO_PUBLIC_API_URL).
+
+============================================================
+2. BANCO DE DADOS
+============================================================
+MySQL 8.0 local (serviço MySQL80), banco `portal_da_arte`.
+Credenciais em python-api/.env (DB_HOST/DB_USER/DB_PASSWORD/DB_NAME).
+Foi restaurado o dump completo BancoDeDados/BD.sql (5 artistas, 6 serviços,
+categorias, conversas e mensagens de demonstração) e aplicadas as migrações:
+  - BancoDeDados/migracao_portfolio_supabase.sql
+  - BancoDeDados/pagamentos_sandbox.sql
+  - BancoDeDados/migracao_carrinho_checkout_asaas.sql
+Backup do banco anterior:
+  BancoDeDados/backup_portal_da_arte_2026-11-25.sql
+
+============================================================
+3. LOGINS DE DEMONSTRAÇÃO (senha: PortalArteDemo123!)
+============================================================
+Artistas:
+  demo.cantora@example.com      (Lia Monteiro)
+  demo.forro@example.com        (Trio Raiz do Agreste)
+  demo.fotografia@example.com   (Rafaela Luz Fotografia)
+  demo.artesvisuais@example.com (Ateliê Cores do Sertão)
+
+Cliente de teste criado para validar cadastro/login:
+  cliente.test@example.com / ClienteTeste123!
+
+============================================================
+4. SUBIR NOVAMENTE (se os processos pararem)
+============================================================
+Backend:
+  cd python-api
+  py -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+Frontend:
+  cd PA-PortalDaArte
+  npx expo start --web --port 8081 --clear
+
+============================================================
+5. OBSERVAÇÕES
+============================================================
+- Python 3.15 não tem wheel para as versões fixadas de httptools e PyYAML;
+  elas não são usadas pelo código. Instale o resto com:
+    py -m pip install -r requirements.txt
+  (se falhar, remova essas duas linhas do requirements temporariamente).
+- SECRET_KEY foi substituído pelo valor placeholder por um segredo aleatório local;
+  tokens gerados antes disso não são mais válidos (basta fazer login de novo).
+- Supabase verificado: bucket privado 'portfolios' acessível e limite de 50 MiB.
+- ASAAS_API_KEY e ASAAS_WEBHOOK_PUBLIC_URL estão vazios em python-api/.env.
+  Cadastro, login, explorar, mensagens, propostas e portfólio funcionam sem eles.
+  Checkout real exige chave Sandbox e um túnel HTTPS até /api/webhooks/asaas/checkout.
+- Portfólio usa Supabase Storage (credenciais já presentes no .env).
+============================================================
+6. IA LOCAL (FUNCIONALIDADES IMPLEMENTADAS)
+============================================================
+Provedor: Ollama local, modelos gratuitos, sem chave de API.
+Configurado em python-api/.env:
+  AI_PROVIDER=ollama
+  OLLAMA_URL=http://127.0.0.1:11434
+  OLLAMA_MODEL=qwen3.5:4b        (qualidade; ~8-20s por descrição em CPU)
+  AI_TIMEOUT_SECONDS=60
+  AI_MAX_TOKENS=100
+Modelo rápido alternativo: qwen2.5:0.5b (~2s, porém qualidade menor).
+
+Endpoint: POST /api/ia/sugerir-descricao-servico (exige login de artista).
+Onde usar no app: Perfil > Editar perfil > Serviços > campo "Descrição do
+novo serviço" > botão "Gerar descrição com IA". O texto gerado preenche o
+campo para revisão; o salvamento continua como antes.
+
+Arquivos novos/alterados:
+  python-api/ia.py          (cliente Ollama, saneamento, fallback)
+  python-api/test_ia.py     (10 testes: endpoint, auth, sanitização, fallback)
+  python-api/main.py        (endpoint /api/ia/...)
+  PA-PortalDaArte/src/app/pages/perfil/perfil.tsx (botão na tela de Perfil)
+  python-api/.env e .env.example (configuração da IA)
+
+2) Sugestões de resposta no chat (autenticado)
+   Endpoint: POST /api/ia/sugerir-respostas  { "conversa_id": 5 }
+   Onde usar: Mensagens > abrir uma conversa > botão "Sugerir respostas" no
+   cabeçalho. Aparecem 3 chips; tocar apenas preenche o campo (não envia).
+   O histórico é sanitizado e mídias viram "Imagem"/"Vídeo" no prompt.
+
+3) Busca por linguagem natural (pública, sem login)
+   Endpoint: POST /api/ia/busca-artistas  { "consulta": "banda de forró para casamento" }
+   Onde usar: Descobrir > campo no topo do painel > "Buscar com IA".
+   Retorna termos/categoria/modalidade; o Explorar aplica os filtros e usa
+   correspondência por qualquer termo. Cache de 1h e limite de 20 buscas/min/IP.
+
+Segurança: CPF, e-mail, telefone e tokens são removidos dos prompts; falha do
+modelo troca por texto/filtros determinísticos (campo "origem": "fallback")
+sem quebrar a tela. Nenhuma chave de IA é enviada ao frontend.
+
+Testes: python -m unittest test_ia  (24 testes, 1 smoke opcional com IA_SMOKE=1)
+
+- Para abrir no celular, troque EXPO_PUBLIC_API_URL pelo IP da máquina na rede
+  (neste momento: http://192.168.15.12:8000) e use o QR Code do Expo.
+- Dados de teste criados durante a subida: conversa #5, proposta #1 aceita e
+  contrato #1 (cliente.test@example.com x Lia Monteiro), para exercitar
+  Contratações e o módulo financeiro sem ficar com telas vazias.
