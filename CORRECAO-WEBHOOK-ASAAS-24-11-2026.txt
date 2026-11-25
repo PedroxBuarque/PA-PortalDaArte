@@ -1,0 +1,56 @@
+PORTAL DA ARTE - CORRECAO DO WEBHOOK ASAAS
+Data: 24/11/2026
+
+DIAGNOSTICO
+-----------
+O arquivo python-api/configurar_webhook_asaas.py anterior criava o webhook via
+POST /v3/webhooks sem enviar o campo "email". Esse campo e obrigatorio na API
+atual do Asaas para criacao de Webhooks. Se o webhook nao for efetivamente
+cadastrado, a tela "Logs de Webhooks" do Asaas nao registra tentativas, porque
+nao existe configuracao ativa para receber os eventos.
+
+Tambem e importante observar que preencher ASAAS_WEBHOOK_PUBLIC_URL e
+ASAAS_WEBHOOK_TOKEN no .env NAO cadastra o webhook automaticamente.
+
+CORRECOES
+---------
+1. configurar_webhook_asaas.py agora:
+   - valida ASAAS_API_KEY, URL, token e e-mail;
+   - usa ASAAS_WEBHOOK_EMAIL, com fallback para SMTP_USERNAME quando for e-mail;
+   - lista GET /v3/webhooks;
+   - atualiza PUT /v3/webhooks/{id} se encontrar a URL/nome;
+   - cria POST /v3/webhooks somente quando necessario;
+   - garante enabled=true e interrupted=false;
+   - configura CHECKOUT_CREATED, CHECKOUT_PAID, CHECKOUT_CANCELED e CHECKOUT_EXPIRED.
+
+2. Foi criado diagnosticar_asaas_checkout.py:
+   - consulta os webhooks realmente cadastrados na conta Asaas;
+   - verifica URL, enabled, interrupted e eventos;
+   - testa a URL publica /health atraves do ngrok;
+   - nao imprime API Key nem authToken.
+
+3. main.py agora possui:
+   GET /api/webhooks/asaas/checkout/health
+   para validar publicamente o tunel sem gerar evento falso.
+
+4. Logs de backend adicionados:
+   [CHECKOUT] enviando...
+   [CHECKOUT] resposta Asaas HTTP=...
+   [CHECKOUT] criado...
+   [WEBHOOK] recebido evento=...
+   [WEBHOOK] evento associado ao pedido=...
+
+COMO TESTAR
+-----------
+1. Inicie o backend FastAPI.
+2. Inicie o ngrok apontando para a porta do backend.
+3. Confirme que ASAAS_WEBHOOK_PUBLIC_URL aponta para o dominio ngrok atual.
+4. Execute CONFIGURAR-WEBHOOK-ASAAS.bat.
+5. Execute DIAGNOSTICAR-ASAAS.bat.
+6. Crie um checkout pelo carrinho.
+
+Ao criar o checkout, CHECKOUT_CREATED deve aparecer nos Logs de Webhooks do
+Asaas mesmo antes do pagamento. Ao pagar, deve chegar CHECKOUT_PAID.
+
+Se o dominio ngrok mudar, atualize ASAAS_WEBHOOK_PUBLIC_URL e rode novamente
+CONFIGURAR-WEBHOOK-ASAAS.bat para atualizar o webhook no Asaas.

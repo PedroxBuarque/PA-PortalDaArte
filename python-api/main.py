@@ -44,6 +44,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
+asaas_logger = logging.getLogger("portal_da_arte.asaas")
+if not asaas_logger.handlers:
+    _asaas_handler = logging.StreamHandler()
+    _asaas_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    asaas_logger.addHandler(_asaas_handler)
+asaas_logger.setLevel(logging.INFO)
+asaas_logger.propagate = False
+
 # ============================================================
 # CONFIGURAÇÃO DE CORS (Essencial para React Native/Web)
 # ============================================================
@@ -2618,14 +2626,17 @@ def criar_checkout_carrinho(dados: CarrinhoCheckoutCreate, current_user: dict = 
                 for row, preco in itens
             ],
         }
+        asaas_logger.info("[CHECKOUT] enviando pedido=%s itens=%s total=%s ambiente=%s", pedido_id, len(itens), total, os.getenv("ASAAS_ENV", "sandbox"))
         with httpx.Client(timeout=20.0) as client:
             response = client.post(f"{config['base_url']}/checkouts", headers=_asaas_headers(config), json=payload)
         try:
             result = response.json()
         except Exception:
             result = {}
+        asaas_logger.info("[CHECKOUT] resposta Asaas pedido=%s HTTP=%s", pedido_id, response.status_code)
         if response.status_code < 200 or response.status_code >= 300:
             detalhe = result.get("errors") or result.get("message") or "O provedor de pagamento recusou a criação do checkout."
+            asaas_logger.error("[CHECKOUT] falha pedido=%s HTTP=%s detalhe=%s", pedido_id, response.status_code, detalhe)
             cursor.execute("UPDATE pedidos_carrinho SET status = 'erro' WHERE id = %s", (pedido_id,))
             conexao.commit()
             raise HTTPException(status_code=502, detail=detalhe)
@@ -2637,6 +2648,7 @@ def criar_checkout_carrinho(dados: CarrinhoCheckoutCreate, current_user: dict = 
         cursor.execute("UPDATE pedidos_carrinho SET checkout_externo_id = %s, status = 'aguardando_pagamento' WHERE id = %s",
                        (checkout_id, pedido_id))
         conexao.commit()
+        asaas_logger.info("[CHECKOUT] criado pedido=%s checkout_id=%s", pedido_id, checkout_id)
         return {
             "status": "sucesso",
             "pedido_id": pedido_id,
@@ -2709,6 +2721,46 @@ def consultar_pedido_carrinho(pedido_id: int, current_user: dict = Depends(get_u
         if conexao: conexao.close()
 
 
+def _frontend_carrinho_retorno_url(resultado: str, pedido_id: int | None = None) -> str:
+    """Monta a URL local do frontend apos o retorno do Asaas."""
+    frontend_base = os.getenv("FRONTEND_URL", "http://localhost:8081").strip().rstrip("/")
+    base = f"{frontend_base}/pages/carrinho/carrinho"
+    parts = urlsplit(base)
+    query = {"checkout": resultado}
+    if pedido_id is not None:
+        query["pedido"] = str(pedido_id)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+@app.get("/api/carrinho/checkout/retorno/success", tags=["Carrinho"])
+def retorno_checkout_success(pedido: int | None = None, checkout: str | None = None):
+    """Retorno publico do Asaas para checkout concluido no navegador."""
+    return RedirectResponse(url=_frontend_carrinho_retorno_url("success", pedido), status_code=302)
+
+
+@app.get("/api/carrinho/checkout/retorno/cancel", tags=["Carrinho"])
+def retorno_checkout_cancel(pedido: int | None = None, checkout: str | None = None):
+    """Retorno publico do Asaas para checkout cancelado no navegador."""
+    return RedirectResponse(url=_frontend_carrinho_retorno_url("cancel", pedido), status_code=302)
+
+
+@app.get("/api/carrinho/checkout/retorno/expired", tags=["Carrinho"])
+def retorno_checkout_expired(pedido: int | None = None, checkout: str | None = None):
+    """Retorno publico do Asaas para checkout expirado no navegador."""
+    return RedirectResponse(url=_frontend_carrinho_retorno_url("expired", pedido), status_code=302)
+
+
+@app.get("/api/webhooks/asaas/checkout/health", tags=["Webhooks"])
+def webhook_asaas_checkout_health():
+    """Health check publico para validar ngrok/roteamento sem processar eventos."""
+    return {
+        "status": "ok",
+        "webhook": "asaas_checkout",
+        "token_configurado": bool(os.getenv("ASAAS_WEBHOOK_TOKEN", "").strip()),
+        "ambiente": os.getenv("ASAAS_ENV", "sandbox").strip().lower(),
+    }
+
+
 @app.post("/api/webhooks/asaas/checkout", tags=["Webhooks"])
 async def webhook_asaas_checkout(request: Request):
     expected = os.getenv("ASAAS_WEBHOOK_TOKEN", "").strip()
@@ -2727,6 +2779,7 @@ async def webhook_asaas_checkout(request: Request):
     checkout = payload.get("checkout") if isinstance(payload.get("checkout"), dict) else {}
     checkout_id = str(checkout.get("id") or payload.get("checkoutId") or "").strip()
     external_reference = str(checkout.get("externalReference") or payload.get("externalReference") or "").strip()
+    asaas_logger.info("[WEBHOOK] recebido evento=%s event_id=%s checkout_id=%s", event_type or "?", event_id or "?", checkout_id or "?")
     if not event_id or not event_type:
         raise HTTPException(status_code=400, detail="Evento Asaas incompleto.")
 
@@ -2758,6 +2811,9 @@ async def webhook_asaas_checkout(request: Request):
                 cursor.execute("UPDATE pedidos_carrinho SET status = 'cancelado' WHERE id = %s AND status <> 'pago'", (pedido_id,))
             elif event_type == "CHECKOUT_EXPIRED":
                 cursor.execute("UPDATE pedidos_carrinho SET status = 'expirado' WHERE id = %s AND status <> 'pago'", (pedido_id,))
+            asaas_logger.info("[WEBHOOK] evento=%s associado ao pedido=%s", event_type, pedido_id)
+        else:
+            asaas_logger.warning("[WEBHOOK] evento=%s sem pedido correspondente checkout_id=%s external_reference=%s", event_type, checkout_id or "?", external_reference or "?")
         conexao.commit()
         return {"received": True}
     except Exception:
