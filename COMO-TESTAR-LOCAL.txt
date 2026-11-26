@@ -142,6 +142,16 @@ BD.sql já suportam o futuro controle de acesso administrativo.
 
 Testes: python -m unittest test_ia  (54 testes, 1 smoke opcional com IA_SMOKE=1)
 
+============================================================
+7. DASHBOARD ADMINISTRATIVO
+============================================================
+Tela: http://localhost:8081/pages/admin/admin
+Login: admin@portaldaarte.local / AdminLocal123! (trocar em producao)
+Ver ADMIN-DASHBOARD.txt: abas, permissoes, LGPD e arquivos.
+Rotas: /api/admin/* (papel admin) e POST /api/visitas (publico, anonimo).
+Migracoes aplicadas: migracao_admin_dashboard.sql + migracao_moderacao_avisos.sql
+Total de testes: 64 (test_admin + test_ia).
+
 - Para abrir no celular, troque EXPO_PUBLIC_API_URL pelo IP da máquina na rede
   (neste momento: http://192.168.15.12:8000) e use o QR Code do Expo.
 - Dados de teste criados durante a subida: conversa #5, proposta #1 aceita e

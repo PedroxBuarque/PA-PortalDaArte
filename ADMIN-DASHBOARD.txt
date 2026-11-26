@@ -1,0 +1,63 @@
+PORTAL DA ARTE - DASHBOARD ADMINISTRATIVO
+Data: 25/11/2026
+
+============================================================
+1. ACESSO
+============================================================
+Tela: http://localhost:8081/pages/admin/admin
+Login local criado: admin@portaldaarte.local / AdminLocal123!
+   (trocar senha em producao; script: python-api/criar_admin.py)
+
+O acesso exige o papel 'admin' em usuario_papeis. Usuarios comuns que
+abrirem a URL sao redirecionados para Descobrir.
+
+============================================================
+2. ABAS DO PAINEL
+============================================================
+Resumo     - KPIs: usuarios, novos (30d), artistas, contratos ativos,
+             propostas abertas, pagamentos pagos, receita, PIX recebidos,
+             repasses, conversas, mensagens, ocorrencias, avisos, visitantes.
+Usuarios   - lista com documento MASCARADO (nunca CPF/CNPJ completo).
+             Acoes: bloquear/ativar (registrado em admin_acoes).
+Artistas   - perfis, categoria, nota, contratacoes, servicos, verificacao.
+Contratos  - valor, status, artista, contratante, escopo.
+Pagamentos - PIX/recebimentos + repasses Asaas.
+Conversas  - SOMENTE metadados; conteudo privado NAO e exibido (LGPD).
+Moderacao  - avisos consultivos; acao "Resolver".
+Ocorrencias- chamados; acao marcar como resolvida.
+Auditoria  - todas as acoes administrativas (admin_acoes).
+Metricas   - metricas diarias da plataforma + visitas.
+Visitantes - sessoes anonimas (hash), primeira/ultima visita, total de views.
+             Filtros por UF e periodo (7/30/90 dias) + ranking de rotas.
+Sidebar   - atalho "Admin" aparece somente para usuarios com papel admin.
+
+============================================================
+3. REGRAS DE LGPD / PRIVACIDADE
+============================================================
+- CPF/CNPJ nunca sao devolvidos pelo painel (mascarados no backend).
+- senha_hash, tokens e dados de pagamento sensiveis nunca sao expostos.
+- Conteudo de mensagens privadas NAO aparece no dashboard.
+- IP do visitante NAO e armazenado: apenas hash com SECRET_KEY + dia.
+- Toda acao administrativa sensivel gera linha em admin_acoes com hash de IP.
+- Nao ha exclusao de dados pessoais pelo painel (apenas bloqueio/suspensao).
+
+============================================================
+4. MIGRACOES E ARQUIVOS
+============================================================
+BancoDeDados/migracao_admin_dashboard.sql (aplicada)
+  -> admin_acoes, visitas_site, visitantes
+BancoDeDados/migracao_moderacao_avisos.sql (aplicada)
+  -> moderacao_avisos
+
+python-api/admin.py            - routers /api/admin/* e /api/visitas
+python-api/criar_admin.py      - cria/promove admin local
+python-api/test_admin.py       - 12 testes (permissao, mascara, LGPD, filtros)
+PA-PortalDaArte/src/app/pages/admin/admin.tsx - tela do painel
+PA-PortalDaArte/src/app/_layout.jsx - registro anonimo de visitas
+
+============================================================
+5. TESTES
+============================================================
+python -m unittest test_admin   -> 12 testes OK
+Endpoint publico: POST /api/visitas { "rota": "/pages/explorar/explorar" }
+Verificacao: GET /api/admin/verificar (Bearer token do admin)

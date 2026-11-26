@@ -3197,3 +3197,8 @@ def abrir_ocorrencia(tipo: str, assunto: str, descricao: str, current_user: dict
 # O modulo usa apenas o ambiente Sandbox do Asaas.
 from pagamentos import criar_router as criar_router_pagamentos
 app.include_router(criar_router_pagamentos(get_db_connection, get_usuario_atual))
+
+# --- Dashboard administrativo (papel admin) e registro anonimo de visitas ---
+from admin import criar_router as criar_router_admin, criar_router_visitas
+app.include_router(criar_router_admin(get_db_connection, get_usuario_atual))
+app.include_router(criar_router_visitas(get_db_connection))
