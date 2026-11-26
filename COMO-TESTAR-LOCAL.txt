@@ -1,0 +1,159 @@
+PORTAL DA ARTE - AMBIENTE LOCAL DE TESTE
+Data: 25/11/2026
+
+============================================================
+1. O QUE ESTÁ RODANDO
+============================================================
+Backend (FastAPI):  http://127.0.0.1:8000
+  - Swagger/UI:      http://127.0.0.1:8000/docs
+  - Status:          GET http://127.0.0.1:8000/
+Frontend (Expo Web): http://localhost:8081
+  - A URL da API está em PA-PortalDaArte/.env (EXPO_PUBLIC_API_URL).
+
+============================================================
+2. BANCO DE DADOS
+============================================================
+MySQL 8.0 local (serviço MySQL80), banco `portal_da_arte`.
+Credenciais em python-api/.env (DB_HOST/DB_USER/DB_PASSWORD/DB_NAME).
+Foi restaurado o dump completo BancoDeDados/BD.sql (5 artistas, 6 serviços,
+categorias, conversas e mensagens de demonstração) e aplicadas as migrações:
+  - BancoDeDados/migracao_portfolio_supabase.sql
+  - BancoDeDados/pagamentos_sandbox.sql
+  - BancoDeDados/migracao_carrinho_checkout_asaas.sql
+Backup do banco anterior:
+  BancoDeDados/backup_portal_da_arte_2026-11-25.sql
+
+============================================================
+3. LOGINS DE DEMONSTRAÇÃO (senha: PortalArteDemo123!)
+============================================================
+Artistas:
+  demo.cantora@example.com      (Lia Monteiro)
+  demo.forro@example.com        (Trio Raiz do Agreste)
+  demo.fotografia@example.com   (Rafaela Luz Fotografia)
+  demo.artesvisuais@example.com (Ateliê Cores do Sertão)
+
+Cliente de teste criado para validar cadastro/login:
+  cliente.test@example.com / ClienteTeste123!
+
+============================================================
+4. SUBIR NOVAMENTE (se os processos pararem)
+============================================================
+Backend:
+  cd python-api
+  py -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+Frontend:
+  cd PA-PortalDaArte
+  npx expo start --web --port 8081 --clear
+
+============================================================
+5. OBSERVAÇÕES
+============================================================
+- Python 3.15 não tem wheel para as versões fixadas de httptools e PyYAML;
+  elas não são usadas pelo código. Instale o resto com:
+    py -m pip install -r requirements.txt
+  (se falhar, remova essas duas linhas do requirements temporariamente).
+- SECRET_KEY foi substituído pelo valor placeholder por um segredo aleatório local;
+  tokens gerados antes disso não são mais válidos (basta fazer login de novo).
+- Supabase verificado: bucket privado 'portfolios' acessível e limite de 50 MiB.
+- ASAAS_API_KEY e ASAAS_WEBHOOK_PUBLIC_URL estão vazios em python-api/.env.
+  Cadastro, login, explorar, mensagens, propostas e portfólio funcionam sem eles.
+  Checkout real exige chave Sandbox e um túnel HTTPS até /api/webhooks/asaas/checkout.
+- Portfólio usa Supabase Storage (credenciais já presentes no .env).
+============================================================
+6. IA LOCAL (FUNCIONALIDADES IMPLEMENTADAS)
+============================================================
+Provedor ATIVO: Groq (API gratuita, chave configurada em python-api/.env):
+  AI_PROVIDER=groq
+  AI_MODEL=qwen/qwen3.8-27b
+  AI_API_KEY=... (segredo; nunca vai para o frontend)
+Todas as funcoes IA respondem em ~1s. Alternativas:
+  Ollama local: AI_PROVIDER=ollama + OLLAMA_MODEL=qwen3.5:4b (~8-20s em CPU)
+  Gemini:       AI_PROVIDER=gemini + AI_API_KEY=... + AI_MODEL=gemini-2.0-flash
+Veja HOSPEDAGEM-HOSTGATOR.txt para publicacao.
+
+1) Gerador de descricao de servico (autenticado)
+Endpoint: POST /api/ia/sugerir-descricao-servico (exige login de artista).
+Onde usar no app: Perfil > Editar perfil > Serviços > campo "Descrição do
+novo serviço" > botão "Gerar descrição com IA". O texto gerado preenche o
+campo para revisão; o salvamento continua como antes.
+A descrição foi ampliada: o modelo pede 70-100 palavras em 2 parágrafos; se a
+resposta vier curta, um complemento determinístico completa o texto (limite de
+500 caracteres com corte em palavra inteira).
+
+Arquivos novos/alterados:
+  python-api/ia.py          (clientes Ollama/Groq/Gemini, saneamento, fallback)
+  python-api/test_ia.py     (50 testes: endpoints, auth, sanitização, fallback,
+                             cache, rate limit, Gemini/Groq e textos longos)
+  python-api/main.py        (endpoints /api/ia/... e /api/conversas/{id}/resumo)
+  PA-PortalDaArte/src/app/pages/perfil/perfil.tsx (botão de descrição)
+  PA-PortalDaArte/src/app/pages/mensagens/mensagens.tsx (sugestões e resumo)
+  PA-PortalDaArte/src/app/pages/explorar/explorar.tsx (busca e recomendações)
+  PA-PortalDaArte/src/app/pages/contratacoes/Contratar.tsx (sugestão de proposta)
+  python-api/.env e .env.example (configuração da IA)
+
+2) Sugestões de resposta no chat (autenticado)
+   Endpoint: POST /api/ia/sugerir-respostas  { "conversa_id": 5 }
+   Onde usar: Mensagens > abrir uma conversa > botão "Sugerir respostas" no
+   cabeçalho. Aparecem 3 chips; tocar apenas preenche o campo (não envia).
+   O histórico é sanitizado e mídias viram "Imagem"/"Vídeo" no prompt.
+
+4) Resumo de conversa (autenticado)
+   Endpoint: GET /api/conversas/{id}/resumo
+   Onde usar: Mensagens > abrir conversa > botão "Resumir conversa" no
+   cabeçalho. Abre um modal com até 5 tópicos (acordos, prazos, pendências).
+   Cache de 5 minutos por conversa/última mensagem; mídia vira legenda.
+
+5) Sugestao de valor e escopo da proposta (autenticado)
+   Endpoint: POST /api/ia/sugerir-proposta
+   Onde usar: Contratar > coluna "Valor" > botão "Sugerir valor e descrição
+   com IA". Preenche descrição e valor (o valor fica dentro da faixa cadastrada
+   do serviço; o cliente pode editar livremente antes de enviar).
+
+7) Moderacao consultiva (autenticada, NUNCA bloqueia)
+   Endpoint: POST /api/ia/moderar-texto { texto, contexto, referencia_id? }
+   Regras locais detectam ofensas, contato/pagamento fora da plataforma,
+   links e dados pessoais; quando ha sinal, o modelo redige um aviso curto.
+   Chat: ao enviar mensagem aparece aviso inline + janela; a mensagem SEMPRE
+   segue adiante. Contratar: aviso antes do envio da proposta, tambem sem bloquear.
+   Avisos suspeitos sao gravados em `moderacao_avisos` (ver migration abaixo)
+   para base do futuro perfil ADM.
+
+6) Recomendacoes personalizadas (autenticado)
+   Endpoint: POST /api/ia/recomendacoes
+   Onde usar: Descobrir > botão "Para você" ao lado de "Ordenar". Reordena a
+   lista por afinidade com os favoritos (categorias e nota). Toque de novo em
+   "IA: ativa" para voltar à ordenação normal.
+
+3) Busca por linguagem natural (pública, sem login)
+   Endpoint: POST /api/ia/busca-artistas  { "consulta": "banda de forró para casamento" }
+   Onde usar: Descobrir > campo no topo do painel > "Buscar com IA".
+   Retorna termos/categoria/modalidade; o Explorar aplica os filtros e usa
+   correspondência por qualquer termo. Cache de 1h e limite de 20 buscas/min/IP.
+
+Segurança: CPF, e-mail, telefone e tokens são removidos dos prompts; falha do
+modelo troca por texto/filtros determinísticos (campo "origem": "fallback")
+sem quebrar a tela. Nenhuma chave de IA é enviada ao frontend.
+
+Migration aplicada: BancoDeDados/migracao_moderacao_avisos.sql
+Tabela `moderacao_avisos` pronta para o painel ADM (usuario, contexto,
+categorias, aviso, resolvido_em). As tabelas `papeis`/`usuario_papeis` do
+BD.sql já suportam o futuro controle de acesso administrativo.
+
+Testes: python -m unittest test_ia  (54 testes, 1 smoke opcional com IA_SMOKE=1)
+
+============================================================
+7. DASHBOARD ADMINISTRATIVO
+============================================================
+Tela: http://localhost:8081/pages/admin/admin
+Login: admin@portaldaarte.local / AdminLocal123! (trocar em producao)
+Ver ADMIN-DASHBOARD.txt: abas, permissoes, LGPD e arquivos.
+Rotas: /api/admin/* (papel admin) e POST /api/visitas (publico, anonimo).
+Migracoes aplicadas: migracao_admin_dashboard.sql + migracao_moderacao_avisos.sql
+Total de testes: 64 (test_admin + test_ia).
+
+- Para abrir no celular, troque EXPO_PUBLIC_API_URL pelo IP da máquina na rede
+  (neste momento: http://192.168.15.12:8000) e use o QR Code do Expo.
+- Dados de teste criados durante a subida: conversa #5, proposta #1 aceita e
+  contrato #1 (cliente.test@example.com x Lia Monteiro), para exercitar
+  Contratações e o módulo financeiro sem ficar com telas vazias.

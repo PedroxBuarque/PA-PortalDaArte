@@ -16,6 +16,7 @@ import {
   Music,
   Pencil,
   Plus,
+  Sparkles,
   Star,
   Trash2,
   Upload,
@@ -175,6 +176,7 @@ export default function IndexScreen() {
   const [editedArtistServices, setEditedArtistServices] = useState<any[]>([]);
   const [newServiceTitle, setNewServiceTitle] = useState("");
   const [newServiceDescription, setNewServiceDescription] = useState("");
+  const [isGeneratingServiceDescription, setIsGeneratingServiceDescription] = useState(false);
   const [newServicePriceMin, setNewServicePriceMin] = useState("");
   const [newServicePriceMax, setNewServicePriceMax] = useState("");
 
@@ -695,6 +697,43 @@ export default function IndexScreen() {
 
   const handleRemoveEditedCustomLink = (id: string) => {
     setEditedCustomLinks(editedCustomLinks.filter((item) => item.id !== id));
+  };
+
+  const handleGenerateServiceDescription = async () => {
+    const titulo = newServiceTitle.trim();
+    if (!titulo) {
+      portfolioNotice("Gerar descrição", "Informe o nome do serviço antes de gerar a descrição.");
+      return;
+    }
+    setIsGeneratingServiceDescription(true);
+    try {
+      const token = await AsyncStorage.getItem("access_token");
+      const partes = location.split(",").map((parte) => parte.trim());
+      const resposta = await fetch(`${URL_API}/api/ia/sugerir-descricao-servico`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          titulo,
+          categoria: editedArtistCategories[0] || "",
+          cidade: partes[0] || "",
+          estado: (partes[1] || "").slice(0, 2),
+          modalidade: artistModeInput,
+        }),
+      });
+      if (!resposta.ok) {
+        const erro = await resposta.json().catch(() => ({}));
+        throw new Error(erro.detail || "Não foi possível gerar a descrição.");
+      }
+      const dados = await resposta.json();
+      setNewServiceDescription(String(dados.descricao || "").slice(0, 500));
+    } catch (erro: any) {
+      portfolioNotice("Gerar descrição", erro?.message || "Não foi possível gerar a descrição.");
+    } finally {
+      setIsGeneratingServiceDescription(false);
+    }
   };
 
   const handlePickProfileImage = async () => {
@@ -1371,6 +1410,20 @@ export default function IndexScreen() {
                             <TextInput value={newServiceDescription} onChangeText={setNewServiceDescription} placeholder="Descrição do serviço (opcional)" placeholderTextColor={theme.textSecondary} multiline maxLength={500} style={[styles.formInput, { minHeight: 64, textAlignVertical: "top", marginBottom: 4 }]}
                               accessibilityLabel="Descrição do novo serviço" />
                             <Text style={{ color: theme.textSecondary, fontSize: 10, textAlign: "right", marginBottom: 8 }}>{newServiceDescription.length}/500 caracteres</Text>
+                            <TouchableOpacity
+                              onPress={handleGenerateServiceDescription}
+                              disabled={isGeneratingServiceDescription}
+                              style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: theme.accent, borderRadius: 9, padding: 10, marginBottom: 10, opacity: isGeneratingServiceDescription ? 0.6 : 1 }}
+                              accessibilityRole="button"
+                              accessibilityLabel="Gerar descrição do serviço com inteligência artificial"
+                            >
+                              {isGeneratingServiceDescription
+                                ? <ActivityIndicator size="small" color={theme.accent} />
+                                : <Sparkles size={15} color={theme.accent} />}
+                              <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 12 }}>
+                                {isGeneratingServiceDescription ? "Gerando descrição..." : "Gerar descrição com IA"}
+                              </Text>
+                            </TouchableOpacity>
                             <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
                               <View style={{ flex: 1 }}><Text style={{ color: theme.textSecondary, fontSize: 11, marginBottom: 5 }}>Valor mínimo (R$)</Text><TextInput value={newServicePriceMin} onChangeText={setNewServicePriceMin} placeholder="Ex.: 150" keyboardType="decimal-pad" placeholderTextColor={theme.textSecondary} style={styles.formInput}
                                 accessibilityLabel={"Valor mínimo (R$)"} /></View>

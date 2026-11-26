@@ -16,6 +16,7 @@ import {
   Trash2,
   ArrowLeft,
   MessageSquare,
+  Sparkles,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { AppVideo } from '../../../components/media/AppVideo';
@@ -26,6 +27,7 @@ import Header from '../../../components/Header';
 import { useTheme } from '../../../components/context/ThemeContext';
 
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
+import { portfolioNotice } from '../../../services/portfolio';
 const URL_API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
 // ---------------------------------------------------------------------------
@@ -87,6 +89,12 @@ export default function MensagensScreen() {
   const [requestError, setRequestError] = useState('');
   const openedTargetRef = useRef<string | null>(null);
   const [messageText, setMessageText] = useState('');
+  const [sugestoesIA, setSugestoesIA] = useState<string[]>([]);
+  const [carregandoSugestoes, setCarregandoSugestoes] = useState(false);
+  const [avisoModeracao, setAvisoModeracao] = useState('');
+  const [resumoIA, setResumoIA] = useState('');
+  const [resumoAberto, setResumoAberto] = useState(false);
+  const [carregandoResumo, setCarregandoResumo] = useState(false);
   const [messagesData, setMessagesData] = useState<Record<string, Mensagem[]>>({});
   const messagesScrollRef = useRef<ScrollView | null>(null);
   const [midiaAnexada, setMidiaAnexada] = useState<AnexoMensagem | null>(null);
@@ -109,6 +117,57 @@ export default function MensagensScreen() {
     const token = await AsyncStorage.getItem('access_token');
     if (!token) throw new Error('Sua sessão expirou. Entre novamente para acessar as mensagens.');
     return token;
+  };
+
+  useEffect(() => {
+    setSugestoesIA([]);
+    setResumoIA('');
+    setResumoAberto(false);
+  }, [selectedId]);
+
+  const handleResumirConversa = async () => {
+    if (!selectedId) return;
+    setCarregandoResumo(true);
+    try {
+      const token = await getToken();
+      const resposta = await fetch(`${URL_API}/api/conversas/${Number(selectedId)}/resumo`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!resposta.ok) {
+        const erro = await resposta.json().catch(() => ({}));
+        throw new Error(erro.detail || 'Não foi possível resumir a conversa.');
+      }
+      const dados = await resposta.json();
+      setResumoIA(dados.resumo || 'Não foi possível gerar o resumo.');
+      setResumoAberto(true);
+    } catch (erro: any) {
+      portfolioNotice('Resumo da conversa', erro?.message || 'Não foi possível resumir a conversa.');
+    } finally {
+      setCarregandoResumo(false);
+    }
+  };
+
+  const handleSugerirRespostas = async () => {
+    if (!selectedId) return;
+    setCarregandoSugestoes(true);
+    try {
+      const token = await getToken();
+      const resposta = await fetch(`${URL_API}/api/ia/sugerir-respostas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ conversa_id: Number(selectedId) }),
+      });
+      if (!resposta.ok) {
+        const erro = await resposta.json().catch(() => ({}));
+        throw new Error(erro.detail || 'Não foi possível sugerir respostas.');
+      }
+      const dados = await resposta.json();
+      setSugestoesIA((dados.sugestoes || []).slice(0, 3));
+    } catch (erro: any) {
+      portfolioNotice('Sugestões', erro?.message || 'Não foi possível sugerir respostas.');
+    } finally {
+      setCarregandoSugestoes(false);
+    }
   };
 
   const mapConversa = (item: any): ConversaUI => {
@@ -247,9 +306,33 @@ export default function MensagensScreen() {
     }
   };
 
+  const verificarModeracao = async (texto: string) => {
+    // Aviso consultivo: nunca impede o envio, mesmo se a checagem falhar.
+    try {
+      const token = await getToken();
+      const resposta = await fetch(`${URL_API}/api/ia/moderar-texto`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ texto, contexto: 'mensagem' }),
+      });
+      if (!resposta.ok) return;
+      const dados = await resposta.json();
+      if (dados.suspeito) {
+        const aviso = dados.aviso || 'Revise o texto antes de enviar.';
+        setAvisoModeracao(aviso);
+        portfolioNotice('Aviso de linguagem', `${aviso}\n\nVocê decide se envia.`);
+      } else {
+        setAvisoModeracao('');
+      }
+    } catch {
+      // Falha na moderação não pode bloquear a conversa.
+    }
+  };
+
   const handleSendMessage = async () => {
     const content = messageText.trim();
     if (!selectedId || (!content && !midiaAnexada)) return;
+    if (content) await verificarModeracao(content);
     try {
       const token = await getToken();
       let response: Response;
@@ -455,17 +538,45 @@ export default function MensagensScreen() {
                       </View>
                     </View>
 
-                    {selectedConversation.podeContratar ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                       <TouchableOpacity
-                        style={styles.btnConfirm}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: theme.accent, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 8, opacity: carregandoSugestoes ? 0.6 : 1 }}
                         activeOpacity={0.85}
-                        onPress={() => router.push({ pathname: '/pages/contratacoes/Contratar', params: { id: String(selectedConversation.artistaId) } } as any)}
+                        onPress={handleSugerirRespostas}
+                        disabled={carregandoSugestoes}
                         accessibilityRole="button"
-                        accessibilityLabel={`Contratar ${selectedConversation.name}`}
+                        accessibilityLabel="Sugerir respostas com inteligência artificial"
                       >
-                        <Text style={styles.btnConfirmText}>Confirmar Contratação</Text>
+                        <Sparkles size={14} color={theme.accent} accessible={false} />
+                        <Text style={{ color: theme.accent, fontSize: 11, fontWeight: '700' }}>
+                          {carregandoSugestoes ? 'Pensando...' : 'Sugerir respostas'}
+                        </Text>
                       </TouchableOpacity>
-                    ) : null}
+                      <TouchableOpacity
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: theme.accent, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 8, opacity: carregandoResumo ? 0.6 : 1 }}
+                        activeOpacity={0.85}
+                        onPress={handleResumirConversa}
+                        disabled={carregandoResumo}
+                        accessibilityRole="button"
+                        accessibilityLabel="Resumir conversa com inteligência artificial"
+                      >
+                        <Sparkles size={14} color={theme.accent} accessible={false} />
+                        <Text style={{ color: theme.accent, fontSize: 11, fontWeight: '700' }}>
+                          {carregandoResumo ? 'Resumindo...' : 'Resumir conversa'}
+                        </Text>
+                      </TouchableOpacity>
+                      {selectedConversation.podeContratar ? (
+                        <TouchableOpacity
+                          style={styles.btnConfirm}
+                          activeOpacity={0.85}
+                          onPress={() => router.push({ pathname: '/pages/contratacoes/Contratar', params: { id: String(selectedConversation.artistaId) } } as any)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Contratar ${selectedConversation.name}`}
+                        >
+                          <Text style={styles.btnConfirmText}>Confirmar Contratação</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
                   </View>
 
                   <ScrollView
@@ -636,6 +747,33 @@ export default function MensagensScreen() {
                     </View>
                   )}
 
+                  {sugestoesIA.length > 0 && (
+                    <View style={{ paddingHorizontal: 12, paddingBottom: 6 }}>
+                      <Text style={{ color: theme.textSecondary, fontSize: 11, marginBottom: 6 }}>
+                        Sugestões com IA — toque para preencher a mensagem:
+                      </Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                        {sugestoesIA.map((sugestao, indice) => (
+                          <TouchableOpacity
+                            key={`${indice}-${sugestao}`}
+                            onPress={() => setMessageText(sugestao.slice(0, LIMITE_CARACTERES))}
+                            style={{ borderWidth: 1, borderColor: theme.accent, backgroundColor: theme.cardBg, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 }}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Usar sugestão: ${sugestao}`}
+                          >
+                            <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>{sugestao}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {avisoModeracao ? (
+                    <Text accessibilityLiveRegion="polite" style={{ color: theme.warning || '#B45309', fontSize: 11, paddingHorizontal: 12, paddingBottom: 6 }}>
+                      Aviso: {avisoModeracao}
+                    </Text>
+                  ) : null}
+
                   <View style={styles.inputRow}>
                     <TextInput
                       style={styles.textInput}
@@ -740,6 +878,25 @@ export default function MensagensScreen() {
               <Text style={styles.dadosLabel}>Tipo de Conteúdo: <Text style={styles.dadosValue}>{modalDadosMensagem?.mediaType ? `Mídia (${modalDadosMensagem.mediaType})` : 'Apenas Texto'}</Text></Text>
               <Text style={styles.dadosLabel}>ID da Mensagem: <Text style={styles.dadosValue}>{modalDadosMensagem?.id}</Text></Text>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal do resumo gerado com IA */}
+      <Modal visible={resumoAberto} transparent={true} animationType="fade" onRequestClose={() => setResumoAberto(false)}>
+        <View style={styles.modalContainer}>
+          <View style={styles.dadosModalContent}>
+            <View style={styles.dadosModalHeader}>
+              <Text style={styles.dadosModalTitle}>Resumo da conversa</Text>
+              <TouchableOpacity onPress={() => setResumoAberto(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Fechar resumo">
+                <X size={20} color={theme.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 380 }}>
+              <Text accessibilityLiveRegion="polite" style={{ color: theme.textPrimary, fontSize: 13, lineHeight: 20 }}>{resumoIA}</Text>
+            </ScrollView>
           </View>
         </View>
       </Modal>

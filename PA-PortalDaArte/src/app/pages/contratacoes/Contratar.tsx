@@ -7,7 +7,7 @@ import { useTheme } from '../../../components/context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Header from '../../../components/Header';
 import Sidebar from '../../../components/Sidebar';
-
+import { portfolioNotice } from '../../../services/portfolio';
 
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
 interface Theme {
@@ -43,6 +43,7 @@ export interface Artista {
   valorBase: number;
   aceitaNegociar: boolean; // false = valor fixo (a opção de negociar some)
   valorMinimo?: number; // opcional: menor proposta aceita pelo artista
+  servicoId?: number; // serviço de referência usado na sugestão de proposta
 }
 
 export type StatusContratacao =
@@ -426,6 +427,7 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
           valorBase,
           aceitaNegociar: Boolean(raw.aceita_negociar ?? raw.aceitaNegociar) || valorBase <= 0,
           valorMinimo: undefined,
+          servicoId: services[0]?.id ? Number(services[0].id) : undefined,
         });
       })
       .catch((error) => {
@@ -455,6 +457,8 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
   const [form, setForm] = useState<FormState>(FORM_INICIAL);
   const [errors, setErrors] = useState<FormErrors>({});
   const [enviando, setEnviando] = useState(false);
+  const [sugerindoIA, setSugerindoIA] = useState(false);
+  const [avisoModeracao, setAvisoModeracao] = useState('');
 
   // Ninguém pode contratar a si mesmo
   const ehProprioPerfil =
@@ -471,6 +475,46 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
       setForm((p) => ({ ...p, [k]: v }));
       setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e));
     };
+
+  const handleSugerirProposta = async () => {
+    if (!artista || sugerindoIA) return;
+    setSugerindoIA(true);
+    try {
+      const token = await AsyncStorage.getItem('access_token');
+      const resposta = await fetch(`${URL_API}/api/ia/sugerir-proposta`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          artista_id: Number(artista.id),
+          servico_id: artista.servicoId,
+          descricao_escopo: form.descricao.trim() || `Pretendo contratar ${artista.nome} para ${form.local.trim() || 'meu evento'}.`,
+          local_ou_modalidade: form.local || undefined,
+          prazo_estimado: form.prazo || undefined,
+        }),
+      });
+      if (!resposta.ok) {
+        const erro = await resposta.json().catch(() => ({}));
+        throw new Error(erro.detail || 'Não foi possível sugerir a proposta.');
+      }
+      const dados = await resposta.json();
+      if (dados.escopo) set('descricao')(String(dados.escopo).slice(0, 500));
+      if (dados.valor_sugerido > 0) {
+        if (podeNegociar && !form.negociar) set('negociar')(true);
+        set('valor')(maskMoeda(String(Math.round(Number(dados.valor_sugerido) * 100))));
+      }
+      notify(
+        'Sugestão pronta',
+        `Valor sugerido: ${formatBRL(Number(dados.valor_sugerido))}${dados.justificativa ? ` — ${dados.justificativa}` : ''}`,
+      );
+    } catch (erro: any) {
+      portfolioNotice('Sugestão com IA', erro?.message || 'Não foi possível sugerir a proposta.');
+    } finally {
+      setSugerindoIA(false);
+    }
+  };
 
   const valorNumero = parseMoeda(form.valor);
   // Sem preço-base, o valor proposto é obrigatório. Com preço-base, a negociação é opcional.
@@ -526,6 +570,29 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
     return e;
   };
 
+  const avisarModeracao = async (texto: string) => {
+    // Somente aviso: a proposta continua sendo enviada normalmente.
+    try {
+      const token = await AsyncStorage.getItem('access_token');
+      const resposta = await fetch(`${URL_API}/api/ia/moderar-texto`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ texto, contexto: 'proposta' }),
+      });
+      if (!resposta.ok) return;
+      const dados = await resposta.json();
+      if (dados.suspeito) {
+        const aviso = dados.aviso || 'Revise o texto antes de enviar.';
+        setAvisoModeracao(aviso);
+        notify('Aviso de linguagem', `${aviso}\n\nVocê decide se envia.`);
+      } else {
+        setAvisoModeracao('');
+      }
+    } catch {
+      // Nunca bloqueia o envio por falha na checagem.
+    }
+  };
+
   const enviar = async () => {
     if (enviando || !artista) return;
 
@@ -540,6 +607,8 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
       notify('Atenção', 'Corrija os campos destacados em vermelho.');
       return;
     }
+
+    await avisarModeracao(`${form.descricao} ${form.mensagem}`.trim());
 
     const inicio = parseData(form.inicio) as Date;
     const prazo = parseData(form.prazo) as Date;
@@ -717,6 +786,19 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
         </Text>
       </View>
 
+      <TouchableOpacity
+        onPress={handleSugerirProposta}
+        disabled={sugerindoIA}
+        accessibilityRole="button"
+        accessibilityLabel="Sugerir valor e descrição da proposta com inteligência artificial"
+        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: theme.accent, borderRadius: 10, padding: 10, marginTop: 10, opacity: sugerindoIA ? 0.6 : 1 }}
+      >
+        <Ionicons name="sparkles" size={15} color={theme.accent} />
+        <Text style={{ color: theme.accent, fontWeight: '700', fontSize: 12 }}>
+          {sugerindoIA ? 'Sugerindo...' : 'Sugerir valor e descrição com IA'}
+        </Text>
+      </TouchableOpacity>
+
       {podeNegociar ? (
         <View style={[styles.row, { justifyContent: 'space-between', marginBottom: 14 }]}>
           <Text style={[styles.label, { color: theme.textPrimary, marginBottom: 0 }]}>
@@ -807,6 +889,11 @@ export default function ContratarScreen({ onSubmit }: ContratarScreenProps) {
         onChangeText={set('descricao')}
         error={errors.descricao}
       />
+      {avisoModeracao ? (
+        <Text style={{ color: theme.warning || '#B45309', fontSize: 12, marginTop: 8 }} accessibilityRole="alert">
+          Aviso: {avisoModeracao}
+        </Text>
+      ) : null}
     </View>
   );
 
