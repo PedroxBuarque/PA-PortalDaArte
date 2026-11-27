@@ -1,7 +1,7 @@
 import React from 'react';
-import { Platform, StyleSheet, ScrollView, View, TouchableOpacity } from 'react-native';
+import { Platform, StyleSheet, View, TouchableOpacity } from 'react-native';
 import { router, usePathname } from 'expo-router';
-import { Sparkles } from 'lucide-react-native';
+import { ShieldCheck, Sparkles } from 'lucide-react-native';
 import { PRIMARY_NAV_ITEMS, SETTINGS_NAV_ITEM } from '../constants/navigation';
 import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
@@ -9,12 +9,31 @@ import { VLibrasText as Text } from './accessibility/VLibrasText';
 import BrandMark from './BrandMark';
 
 export const MENU_ITEMS = PRIMARY_NAV_ITEMS;
+const URL_API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
 export default function Sidebar() {
   const { theme } = useTheme();
   const { status, requireAuth } = useAuth();
   const pathname = usePathname();
   const styles = getStyles(theme);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let ativo = true;
+    (async () => {
+      try {
+        const token = await AsyncStorage.getItem('access_token');
+        if (!token) return;
+        const resposta = await fetch(`${URL_API}/api/admin/verificar`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (ativo) setIsAdmin(resposta.ok);
+      } catch {
+        if (ativo) setIsAdmin(false);
+      }
+    })();
+    return () => { ativo = false; };
+  }, [status]);
 
   const isActive = (item) => pathname === item.route || pathname.includes(item.id);
 
@@ -81,6 +100,11 @@ export default function Sidebar() {
       </View>
 
       <View style={styles.footerDivider} />
+      {isAdmin ? (
+        <View style={styles.footerMenu}>
+          {renderItem({ id: 'admin', label: 'Admin', route: '/pages/admin/admin', icon: ShieldCheck, private: true })}
+        </View>
+      ) : null}
       <View style={styles.footerMenu}>{renderItem(SETTINGS_NAV_ITEM)}</View>
       </ScrollView>
     </View>

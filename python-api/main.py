@@ -34,6 +34,10 @@ from portfolio_storage import (
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 import bcrypt
+from ia import (
+    IAError, busca_fallback, interpretar_busca, moderar_texto, recomendar_artistas,
+    resumir_conversa, sugerir_descricao_servico, sugerir_proposta, sugerir_respostas,
+)
 
 # Configuração ao lado da API; aceita BOM do Windows e preserva variáveis já exportadas.
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"), encoding="utf-8-sig", override=False)
@@ -43,6 +47,14 @@ app = FastAPI(
     description="API FastAPI integrada diretamente com o banco de dados MySQL.",
     version="1.0.0"
 )
+
+asaas_logger = logging.getLogger("portal_da_arte.asaas")
+if not asaas_logger.handlers:
+    _asaas_handler = logging.StreamHandler()
+    _asaas_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    asaas_logger.addHandler(_asaas_handler)
+asaas_logger.setLevel(logging.INFO)
+asaas_logger.propagate = False
 
 # ============================================================
 # CONFIGURAÇÃO DE CORS (Essencial para React Native/Web)
@@ -1692,6 +1704,334 @@ def criar_servico_artista(servico: ServicoCreate, current_user: dict = Depends(g
         if conexao: conexao.close()
 
 
+class IAServicoRequest(BaseModel):
+    titulo: str = Field(..., min_length=2, max_length=150)
+    categoria: Optional[str] = Field(None, max_length=100)
+    publico: Optional[str] = Field(None, max_length=150)
+    cidade: Optional[str] = Field(None, max_length=100)
+    estado: Optional[str] = Field(None, max_length=2)
+    anos_experiencia: Optional[int] = Field(None, ge=0, le=80)
+    modalidade: Optional[str] = Field("ambos", max_length=20)
+    preco_min: Optional[float] = Field(None, ge=0)
+    preco_max: Optional[float] = Field(None, ge=0)
+
+
+@app.post("/api/ia/sugerir-descricao-servico", tags=["IA"])
+def sugerir_descricao_servico_endpoint(
+    dados: IAServicoRequest,
+    current_user: dict = Depends(get_usuario_atual),
+):
+    """Sugere uma descrição para o serviço; o artista revisa antes de salvar."""
+    try:
+        return sugerir_descricao_servico(dados.model_dump())
+    except IAError:
+        logger.error("Falha ao sugerir descrição de serviço (%s).", "ia")
+        raise HTTPException(
+            status_code=503,
+            detail="Não foi possível gerar a sugestão agora. Tente novamente."
+        )
+
+
+class IASugestoesRequest(BaseModel):
+    conversa_id: int = Field(..., gt=0)
+
+
+@app.post("/api/ia/sugerir-respostas", tags=["IA"])
+def sugerir_respostas_endpoint(
+    dados: IASugestoesRequest,
+    current_user: dict = Depends(get_usuario_atual),
+):
+    """Sugere respostas curtas para a conversa; não envia mensagem automaticamente."""
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        usuario_id = current_user["id"]
+        cursor.execute(
+            "SELECT id FROM conversas WHERE id = %s AND (contratante_id = %s OR artista_id = %s)",
+            (dados.conversa_id, usuario_id, usuario_id),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+        cursor.execute(
+            """SELECT remetente_id, conteudo FROM mensagens
+               WHERE conversa_id = %s ORDER BY criado_em DESC, id DESC LIMIT 6""",
+            (dados.conversa_id,),
+        )
+        historico = []
+        for linha in reversed(cursor.fetchall() or []):
+            conteudo = linha.get("conteudo") or ""
+            midia = _decodificar_mensagem_midia(conteudo)
+            if midia:
+                conteudo = midia["caption"] or ("Vídeo" if midia["type"] == "video" else "Imagem")
+            prefixo = "Eu: " if int(linha["remetente_id"]) == int(usuario_id) else "Outra pessoa: "
+            historico.append(prefixo + conteudo)
+        return sugerir_respostas(historico)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Falha ao sugerir respostas (%s).", "ia")
+        raise HTTPException(status_code=503, detail="Não foi possível sugerir respostas agora.")
+    finally:
+        if cursor:
+            cursor.close()
+        if conexao:
+            conexao.close()
+
+
+class IABuscaRequest(BaseModel):
+    consulta: str = Field(..., min_length=3, max_length=300)
+
+
+_busca_ia_cache = {}
+_busca_ia_tentativas = {}
+_busca_ia_lock = threading.Lock()
+
+
+def limitar_busca_ia(endereco_ip):
+    """Limite simples por IP para a rota pública de IA (20 buscas/minuto)."""
+    agora = time.monotonic()
+    with _busca_ia_lock:
+        tentativas = _busca_ia_tentativas.setdefault(endereco_ip, deque())
+        while tentativas and tentativas[0] <= agora - 60:
+            tentativas.popleft()
+        if len(tentativas) >= 20:
+            raise HTTPException(status_code=429, detail="Muitas buscas com IA. Tente novamente em instantes.")
+        tentativas.append(agora)
+
+
+@app.post("/api/ia/busca-artistas", tags=["IA"])
+def buscar_artistas_com_ia(dados: IABuscaRequest, request: Request):
+    """Interpreta uma frase do visitante e devolve filtros para o Explorar."""
+    endereco_ip = request.client.host if request.client else "desconhecido"
+    limitar_busca_ia(endereco_ip)
+    chave = re.sub(r"\s+", " ", dados.consulta.strip().lower())
+    with _busca_ia_lock:
+        entrada = _busca_ia_cache.get(chave)
+        if entrada and entrada[0] > time.monotonic():
+            return entrada[1]
+
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute("SELECT DISTINCT nome FROM categorias WHERE ativo = TRUE ORDER BY nome")
+        categorias = [row["nome"] for row in cursor.fetchall()]
+        cursor.execute("SELECT DISTINCT modalidade FROM servicos WHERE ativo = TRUE")
+        modalidades = [row["modalidade"] for row in cursor.fetchall()]
+        resultado = interpretar_busca(dados.consulta, categorias, modalidades)
+        with _busca_ia_lock:
+            if len(_busca_ia_cache) > 500:
+                _busca_ia_cache.clear()
+            _busca_ia_cache[chave] = (time.monotonic() + 3600, resultado)
+        return resultado
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Falha na busca com IA; usando termos simples (%s).", "ia")
+        return busca_fallback(dados.consulta)
+    finally:
+        if cursor:
+            cursor.close()
+        if conexao:
+            conexao.close()
+
+
+class IAModeracaoRequest(BaseModel):
+    texto: str = Field(..., min_length=1, max_length=2000)
+    contexto: str = Field("mensagem", max_length=30)
+    referencia_id: Optional[int] = Field(None, gt=0)
+
+
+@app.post("/api/ia/moderar-texto", tags=["IA"])
+def moderar_texto_endpoint(
+    dados: IAModeracaoRequest,
+    current_user: dict = Depends(get_usuario_atual),
+):
+    """Aviso consultivo: nunca impede o envio. Suspeitos ficam registrados para revisão."""
+    resultado = moderar_texto(dados.texto)
+    if resultado.get("suspeito"):
+        conexao = None
+        cursor = None
+        try:
+            conexao = get_db_connection()
+            cursor = conexao.cursor()
+            cursor.execute(
+                """INSERT INTO moderacao_avisos
+                   (usuario_id, contexto, referencia_id, texto_resumo, categorias_json, aviso)
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                (
+                    current_user["id"], dados.contexto[:30], dados.referencia_id,
+                    dados.texto[:500], json.dumps(resultado.get("categorias", []), ensure_ascii=False),
+                    resultado.get("aviso", "")[:500],
+                ),
+            )
+            conexao.commit()
+        except Exception:
+            logger.error("Falha ao registrar aviso de moderação (%s).", "ia")
+        finally:
+            if cursor:
+                cursor.close()
+            if conexao:
+                conexao.close()
+    return resultado
+
+
+class IARecArtista(BaseModel):
+    id: int
+    nome: str = Field("", max_length=100)
+    categorias: List[str] = Field(default_factory=list, max_length=8)
+    servicos: List[str] = Field(default_factory=list, max_length=8)
+    nota: float = 0
+    cidade: str = Field("", max_length=100)
+
+
+class IARecRequest(BaseModel):
+    artistas: List[IARecArtista] = Field(..., min_length=1, max_length=30)
+    favoritos_ids: List[int] = Field(default_factory=list, max_length=30)
+    limite: int = Field(12, ge=1, le=30)
+
+
+@app.post("/api/ia/recomendacoes", tags=["IA"])
+def recomendar_artistas_endpoint(
+    dados: IARecRequest,
+    current_user: dict = Depends(get_usuario_atual),
+):
+    """Reordena os artistas enviados pelo app; não grava nada no banco."""
+    try:
+        return recomendar_artistas(
+            [item.model_dump() for item in dados.artistas],
+            dados.favoritos_ids,
+            dados.limite,
+        )
+    except Exception:
+        logger.error("Falha nas recomendações (%s).", "ia")
+        raise HTTPException(status_code=503, detail="Não foi possível gerar recomendações agora.")
+
+
+class IAPropostaRequest(BaseModel):
+    artista_id: int = Field(..., gt=0)
+    servico_id: Optional[int] = Field(None, gt=0)
+    descricao_escopo: str = Field(..., min_length=10, max_length=1000)
+    local_ou_modalidade: Optional[str] = Field(None, max_length=255)
+    prazo_estimado: Optional[str] = Field(None, max_length=10)
+
+
+@app.post("/api/ia/sugerir-proposta", tags=["IA"])
+def sugerir_proposta_endpoint(
+    dados: IAPropostaRequest,
+    current_user: dict = Depends(get_usuario_atual),
+):
+    """Sugere valor/escopo consultivos; o valor enviado pelo cliente continua soberano."""
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT usuario_id, nome_artistico, nota_media, cidade_atendimento, "
+            "estado_atendimento, categoria_atuacao FROM perfis_artista WHERE usuario_id = %s",
+            (dados.artista_id,),
+        )
+        artista = cursor.fetchone()
+        if not artista:
+            raise HTTPException(status_code=404, detail="Artista não encontrado.")
+        servico = None
+        if dados.servico_id:
+            cursor.execute(
+                "SELECT id, titulo, preco_min, preco_max, modalidade FROM servicos "
+                "WHERE id = %s AND artista_id = %s AND ativo = TRUE",
+                (dados.servico_id, dados.artista_id),
+            )
+            servico = cursor.fetchone()
+        if not servico:
+            cursor.execute(
+                "SELECT id, titulo, preco_min, preco_max, modalidade FROM servicos "
+                "WHERE artista_id = %s AND ativo = TRUE ORDER BY id ASC LIMIT 1",
+                (dados.artista_id,),
+            )
+            servico = cursor.fetchone()
+        return sugerir_proposta({
+            "titulo": (servico or {}).get("titulo") or artista.get("nome_artistico") or "Serviço artístico",
+            "descricao_escopo": dados.descricao_escopo,
+            "local_ou_modalidade": dados.local_ou_modalidade,
+            "preco_min": float((servico or {}).get("preco_min")) if (servico or {}).get("preco_min") is not None else None,
+            "preco_max": float((servico or {}).get("preco_max")) if (servico or {}).get("preco_max") is not None else None,
+            "modalidade": (servico or {}).get("modalidade") or "ambos",
+            "categoria": artista.get("categoria_atuacao") or "",
+        })
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Falha ao sugerir proposta (%s).", "ia")
+        raise HTTPException(status_code=503, detail="Não foi possível sugerir a proposta agora.")
+    finally:
+        if cursor:
+            cursor.close()
+        if conexao:
+            conexao.close()
+
+
+_resumo_cache = {}
+_resumo_lock = threading.Lock()
+
+
+@app.get("/api/conversas/{conversa_id}/resumo", tags=["IA"])
+def resumir_conversa_endpoint(conversa_id: int, current_user: dict = Depends(get_usuario_atual)):
+    """Resume uma conversa sob demanda, sem enviar mídia ao provedor de IA."""
+    conexao = None
+    cursor = None
+    try:
+        conexao = get_db_connection()
+        cursor = conexao.cursor(dictionary=True)
+        usuario_id = current_user["id"]
+        cursor.execute(
+            "SELECT id FROM conversas WHERE id = %s AND (contratante_id = %s OR artista_id = %s)",
+            (conversa_id, usuario_id, usuario_id),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+        cursor.execute(
+            """SELECT id, remetente_id, conteudo FROM mensagens
+               WHERE conversa_id = %s ORDER BY criado_em DESC, id DESC LIMIT 40""",
+            (conversa_id,),
+        )
+        linhas = cursor.fetchall() or []
+        ultima_id = linhas[0]["id"] if linhas else 0
+        chave = (int(usuario_id), int(conversa_id), int(ultima_id))
+        with _resumo_lock:
+            entrada = _resumo_cache.get(chave)
+            if entrada and entrada[0] > time.monotonic():
+                return entrada[1]
+        historico = []
+        for linha in reversed(linhas):
+            conteudo = linha.get("conteudo") or ""
+            midia = _decodificar_mensagem_midia(conteudo)
+            if midia:
+                conteudo = midia["caption"] or ("Vídeo" if midia["type"] == "video" else "Imagem")
+            prefixo = "Eu: " if int(linha["remetente_id"]) == int(usuario_id) else "Outra pessoa: "
+            historico.append(prefixo + conteudo)
+        resultado = resumir_conversa(historico)
+        resultado["mensagens_resumidas"] = len(historico)
+        with _resumo_lock:
+            if len(_resumo_cache) > 300:
+                _resumo_cache.clear()
+            _resumo_cache[chave] = (time.monotonic() + 300, resultado)
+        return resultado
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Falha ao resumir conversa (%s).", "ia")
+        raise HTTPException(status_code=503, detail="Não foi possível resumir a conversa agora.")
+    finally:
+        if cursor:
+            cursor.close()
+        if conexao:
+            conexao.close()
+
+
 @app.get("/api/artistas/me/detalhes", tags=["Artista"])
 def obter_detalhes_artista(current_user: dict = Depends(get_usuario_atual)):
     """Lista as categorias/estilos e serviços editáveis do artista autenticado."""
@@ -2724,14 +3064,17 @@ def criar_checkout_carrinho(dados: CarrinhoCheckoutCreate, current_user: dict = 
                 for row, preco in itens
             ],
         }
+        asaas_logger.info("[CHECKOUT] enviando pedido=%s itens=%s total=%s ambiente=%s", pedido_id, len(itens), total, os.getenv("ASAAS_ENV", "sandbox"))
         with httpx.Client(timeout=20.0) as client:
             response = client.post(f"{config['base_url']}/checkouts", headers=_asaas_headers(config), json=payload)
         try:
             result = response.json()
         except Exception:
             result = {}
+        asaas_logger.info("[CHECKOUT] resposta Asaas pedido=%s HTTP=%s", pedido_id, response.status_code)
         if response.status_code < 200 or response.status_code >= 300:
             detalhe = result.get("errors") or result.get("message") or "O provedor de pagamento recusou a criação do checkout."
+            asaas_logger.error("[CHECKOUT] falha pedido=%s HTTP=%s detalhe=%s", pedido_id, response.status_code, detalhe)
             cursor.execute("UPDATE pedidos_carrinho SET status = 'erro' WHERE id = %s", (pedido_id,))
             conexao.commit()
             raise HTTPException(status_code=502, detail=detalhe)
@@ -2743,6 +3086,7 @@ def criar_checkout_carrinho(dados: CarrinhoCheckoutCreate, current_user: dict = 
         cursor.execute("UPDATE pedidos_carrinho SET checkout_externo_id = %s, status = 'aguardando_pagamento' WHERE id = %s",
                        (checkout_id, pedido_id))
         conexao.commit()
+        asaas_logger.info("[CHECKOUT] criado pedido=%s checkout_id=%s", pedido_id, checkout_id)
         return {
             "status": "sucesso",
             "pedido_id": pedido_id,
@@ -2815,6 +3159,46 @@ def consultar_pedido_carrinho(pedido_id: int, current_user: dict = Depends(get_u
         if conexao: conexao.close()
 
 
+def _frontend_carrinho_retorno_url(resultado: str, pedido_id: int | None = None) -> str:
+    """Monta a URL local do frontend apos o retorno do Asaas."""
+    frontend_base = os.getenv("FRONTEND_URL", "http://localhost:8081").strip().rstrip("/")
+    base = f"{frontend_base}/pages/carrinho/carrinho"
+    parts = urlsplit(base)
+    query = {"checkout": resultado}
+    if pedido_id is not None:
+        query["pedido"] = str(pedido_id)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+@app.get("/api/carrinho/checkout/retorno/success", tags=["Carrinho"])
+def retorno_checkout_success(pedido: int | None = None, checkout: str | None = None):
+    """Retorno publico do Asaas para checkout concluido no navegador."""
+    return RedirectResponse(url=_frontend_carrinho_retorno_url("success", pedido), status_code=302)
+
+
+@app.get("/api/carrinho/checkout/retorno/cancel", tags=["Carrinho"])
+def retorno_checkout_cancel(pedido: int | None = None, checkout: str | None = None):
+    """Retorno publico do Asaas para checkout cancelado no navegador."""
+    return RedirectResponse(url=_frontend_carrinho_retorno_url("cancel", pedido), status_code=302)
+
+
+@app.get("/api/carrinho/checkout/retorno/expired", tags=["Carrinho"])
+def retorno_checkout_expired(pedido: int | None = None, checkout: str | None = None):
+    """Retorno publico do Asaas para checkout expirado no navegador."""
+    return RedirectResponse(url=_frontend_carrinho_retorno_url("expired", pedido), status_code=302)
+
+
+@app.get("/api/webhooks/asaas/checkout/health", tags=["Webhooks"])
+def webhook_asaas_checkout_health():
+    """Health check publico para validar ngrok/roteamento sem processar eventos."""
+    return {
+        "status": "ok",
+        "webhook": "asaas_checkout",
+        "token_configurado": bool(os.getenv("ASAAS_WEBHOOK_TOKEN", "").strip()),
+        "ambiente": os.getenv("ASAAS_ENV", "sandbox").strip().lower(),
+    }
+
+
 @app.post("/api/webhooks/asaas/checkout", tags=["Webhooks"])
 async def webhook_asaas_checkout(request: Request):
     expected = os.getenv("ASAAS_WEBHOOK_TOKEN", "").strip()
@@ -2833,6 +3217,7 @@ async def webhook_asaas_checkout(request: Request):
     checkout = payload.get("checkout") if isinstance(payload.get("checkout"), dict) else {}
     checkout_id = str(checkout.get("id") or payload.get("checkoutId") or "").strip()
     external_reference = str(checkout.get("externalReference") or payload.get("externalReference") or "").strip()
+    asaas_logger.info("[WEBHOOK] recebido evento=%s event_id=%s checkout_id=%s", event_type or "?", event_id or "?", checkout_id or "?")
     if not event_id or not event_type:
         raise HTTPException(status_code=400, detail="Evento Asaas incompleto.")
 
@@ -2864,6 +3249,9 @@ async def webhook_asaas_checkout(request: Request):
                 cursor.execute("UPDATE pedidos_carrinho SET status = 'cancelado' WHERE id = %s AND status <> 'pago'", (pedido_id,))
             elif event_type == "CHECKOUT_EXPIRED":
                 cursor.execute("UPDATE pedidos_carrinho SET status = 'expirado' WHERE id = %s AND status <> 'pago'", (pedido_id,))
+            asaas_logger.info("[WEBHOOK] evento=%s associado ao pedido=%s", event_type, pedido_id)
+        else:
+            asaas_logger.warning("[WEBHOOK] evento=%s sem pedido correspondente checkout_id=%s external_reference=%s", event_type, checkout_id or "?", external_reference or "?")
         conexao.commit()
         return {"received": True}
     except Exception:
@@ -2971,3 +3359,8 @@ def abrir_ocorrencia(tipo: str, assunto: str, descricao: str, current_user: dict
 # O modulo usa apenas o ambiente Sandbox do Asaas.
 from pagamentos import criar_router as criar_router_pagamentos
 app.include_router(criar_router_pagamentos(get_db_connection, get_usuario_atual))
+
+# --- Dashboard administrativo (papel admin) e registro anonimo de visitas ---
+from admin import criar_router as criar_router_admin, criar_router_visitas
+app.include_router(criar_router_admin(get_db_connection, get_usuario_atual))
+app.include_router(criar_router_visitas(get_db_connection))

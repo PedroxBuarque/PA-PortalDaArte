@@ -1,6 +1,7 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Image, Modal, PanResponder, Platform, SafeAreaView, ScrollView, StatusBar, StyleSheet, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { AccessibleTextInput as TextInput } from '../../../components/accessibility/AccessibleTextInput';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Header from "../../../components/Header";
 import Sidebar from "../../../components/Sidebar";
 import { DESKTOP_BREAKPOINT, MOBILE_BREAKPOINT } from "../../../constants/responsive";
@@ -15,6 +16,7 @@ import { buildCategoryOptions, categoryKey } from "../../../constants/artist-cat
 import { ArrowUpRight, ShoppingBag, SlidersHorizontal, Sparkles } from "lucide-react-native";
 
 import { VLibrasText as Text } from '../../../components/accessibility/VLibrasText';
+import { portfolioNotice } from '../../../services/portfolio';
 const URL_API = process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 // Geocodificação de cidades para calcular distância em linha reta.
@@ -365,6 +367,13 @@ export default function ExplorarScreen() {
   const { favoriteIds, isFavorite, addFavorite, removeFavorite, whenReady } = useFavorites();
   const { addItem, hasService } = useCart();
   const [cartNotice, setCartNotice] = useState("");
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiSearch, setAiSearch] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNotice, setAiNotice] = useState("");
+  const [recIds, setRecIds] = useState<number[] | null>(null);
+  const [recomendando, setRecomendando] = useState(false);
+  const [recNotice, setRecNotice] = useState("");
 
   const showFilterSidebar = canUseFilterSidebar && filtersVisible;
   // O grid considera a largura REAL disponível depois da navegação e do painel de filtros.
@@ -589,7 +598,10 @@ export default function ExplorarScreen() {
     // Cada palavra digitada precisa aparecer em nome, estilo, instrumento ou serviços (ex.: "violão forró").
     const searchTerms = foldText(searchQuery).split(/\s+/).filter(Boolean);
     const result = artists.filter((artist) => {
-      const matchesSearch = searchTerms.every((term) => artist.searchableText.includes(term));
+      // Busca com IA: qualquer termo interpretado já é suficiente; na busca comum, todos devem aparecer.
+      const matchesSearch = searchTerms.length === 0 || (aiSearch
+        ? searchTerms.some((term) => artist.searchableText.includes(term))
+        : searchTerms.every((term) => artist.searchableText.includes(term)));
       // Categoria = nome real cadastrado no Perfil (principal ou "categorias e estilos").
       const matchesCategory =
         activeCategory === ALL_CATEGORIES || artist.categoryKeys.includes(categoryKey(activeCategory));
@@ -608,7 +620,7 @@ export default function ExplorarScreen() {
       );
     });
 
-    return [...result].sort((a, b) => {
+    const ordenados = [...result].sort((a, b) => {
       if (sort === "priceAsc") return a.price - b.price;
       if (sort === "priceDesc") return b.price - a.price;
       if (sort === "distance") {
@@ -616,11 +628,17 @@ export default function ExplorarScreen() {
         const bDistance = Number.isFinite(b.distanceKm) ? b.distanceKm : Number.POSITIVE_INFINITY;
         return aDistance - bDistance;
       }
-      
+
       // Ordena pelas avaliações reais retornadas pela API; perfis sem avaliação ficam no fim.
       return b.rating - a.rating;
     });
-  }, [artists, searchQuery, activeCategory, modality, activeService, numericMin, numericMax, ratingFilter, distance, sort, location]);
+    if (recIds && recIds.length > 0) {
+      const rank = new Map(recIds.map((id, indice) => [id, indice]));
+      return [...ordenados].sort((a, b) =>
+        (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+    }
+    return ordenados;
+  }, [artists, searchQuery, aiSearch, recIds, activeCategory, modality, activeService, numericMin, numericMax, ratingFilter, distance, sort, location]);
 
   useEffect(() => {
     setVisibleCount(6);
@@ -678,6 +696,95 @@ export default function ExplorarScreen() {
     setDistance(100);
     setLocation(ALL_LOCATIONS);
     setSort("rating");
+    setAiSearch(false);
+    setAiNotice("");
+    setRecIds(null);
+    setRecNotice("");
+  };
+
+  const handleBuscarComIA = async () => {
+    const consulta = aiPrompt.trim();
+    if (consulta.length < 3) {
+      setAiNotice("Descreva o que procura com pelo menos 3 caracteres.");
+      return;
+    }
+    setAiBusy(true);
+    setAiNotice("");
+    try {
+      const resposta = await fetch(`${URL_API}/api/ia/busca-artistas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ consulta }),
+      });
+      if (!resposta.ok) {
+        const erro = await resposta.json().catch(() => ({}));
+        throw new Error(erro.detail || "Não foi possível interpretar a busca.");
+      }
+      const dados = await resposta.json();
+      const termos: string[] = (dados.termos || []).slice(0, 6);
+      if (termos.length === 0) throw new Error("Não consegui extrair termos da sua busca.");
+      setQuery(termos.join(" "));
+      if (dados.categoria) setCategory(dados.categoria);
+      if (dados.modalidade && dados.modalidade !== "ambos") setModality(dados.modalidade);
+      setAiSearch(true);
+      setAiNotice(`Busca interpretada: ${termos.join(", ")}.`);
+    } catch (erro: any) {
+      portfolioNotice("Busca com IA", erro?.message || "Não foi possível interpretar a busca.");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const handleRecomendar = async () => {
+    if (recomendando) return;
+    if (recIds) {
+      setRecIds(null);
+      setRecNotice("");
+      return;
+    }
+    if (filteredArtists.length < 2) {
+      setRecNotice("Precisa de pelo menos 2 artistas na busca para recomendar.");
+      return;
+    }
+    setRecomendando(true);
+    setRecNotice("");
+    try {
+      const token = await AsyncStorage.getItem("access_token");
+      if (!token) {
+        requireAuth(() => handleRecomendar(), DISCOVER_ROUTE, "modal");
+        return;
+      }
+      const resposta = await fetch(`${URL_API}/api/ia/recomendacoes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          artistas: filteredArtists.slice(0, 30).map((artist) => ({
+            id: artist.id,
+            nome: artist.name.slice(0, 100),
+            categorias: artist.categories.slice(0, 6),
+            servicos: artist.serviceTitles.slice(0, 6),
+            nota: artist.rating,
+            cidade: artist.city.slice(0, 100),
+          })),
+          favoritos_ids: favoriteIds.slice(0, 30).map(Number),
+          limite: Math.min(filteredArtists.length, 30),
+        }),
+      });
+      if (!resposta.ok) {
+        const erro = await resposta.json().catch(() => ({}));
+        throw new Error(erro.detail || "Não foi possível gerar recomendações.");
+      }
+      const dados = await resposta.json();
+      if (!Array.isArray(dados.ids) || dados.ids.length < 2) {
+        throw new Error("Não foi possível ordenar os artistas.");
+      }
+      setRecIds(dados.ids.map(Number));
+      setRecNotice("Ordenado por afinidade com seus favoritos.");
+    } catch (erro: any) {
+      portfolioNotice("Recomendações", erro?.message || "Não foi possível gerar recomendações.");
+    } finally {
+      setRecomendando(false);
+    }
   };
 
   const formatPrice = (value: number) => `R$ ${value.toLocaleString("pt-BR")}`;
@@ -1068,6 +1175,30 @@ export default function ExplorarScreen() {
                     <Text style={styles.heroDescription}>
                     Descubra artistas independentes, compare estilos e encontre a pessoa certa para transformar seu projeto em experiência.
                     </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, zIndex: 3 }}>
+                      <TextInput
+                        value={aiPrompt}
+                        onChangeText={setAiPrompt}
+                        placeholder="Descreva o que procura, ex.: banda de forró para casamento"
+                        placeholderTextColor={theme.heroMuted || "#E6D8CF"}
+                        style={{ flex: 1, minWidth: 0, backgroundColor: theme.cardBg, borderRadius: 12, borderWidth: 1, borderColor: theme.borderColor, paddingHorizontal: 12, paddingVertical: 10, color: theme.textPrimary, fontSize: 13 }}
+                        accessibilityLabel="Descreva com IA o artista que você procura"
+                        onSubmitEditing={handleBuscarComIA}
+                      />
+                      <TouchableOpacity
+                        onPress={handleBuscarComIA}
+                        disabled={aiBusy}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: theme.accent, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, opacity: aiBusy ? 0.6 : 1 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Buscar artistas com inteligência artificial"
+                      >
+                        <Sparkles size={15} color={theme.onAccent || "#FFFFFF"} accessible={false} />
+                        <Text style={{ color: theme.onAccent || "#FFFFFF", fontWeight: '700', fontSize: 12 }}>
+                          {aiBusy ? 'Buscando...' : 'Buscar com IA'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    {aiNotice ? <Text accessibilityLiveRegion="polite" style={{ color: theme.heroMuted || "#E6D8CF", fontSize: 11, marginTop: 8 }}>{aiNotice}</Text> : null}
                     </View>
                     <View style={styles.heroStat}>
                     <Text style={styles.heroStatNumber}>{filteredArtists.length}</Text>
@@ -1102,6 +1233,19 @@ export default function ExplorarScreen() {
                     resultado{filteredArtists.length === 1 ? "" : "s"} encontrado{filteredArtists.length === 1 ? "" : "s"}
                     </Text>
                     </Text>
+
+                    <TouchableOpacity
+                    onPress={handleRecomendar}
+                    disabled={recomendando}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: recIds ? theme.accent : theme.borderColor, backgroundColor: recIds ? theme.accentSoft || theme.cardBg : 'transparent', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, opacity: recomendando ? 0.6 : 1, marginRight: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={recIds ? "Desativar recomendação por IA" : "Ordenar artistas por afinidade com meus favoritos"}
+                    >
+                    <Sparkles size={14} color={theme.accent} accessible={false} />
+                    <Text style={{ color: theme.accent, fontSize: 11, fontWeight: '700' }}>
+                    {recIds ? 'IA: ativa' : recomendando ? 'Ordenando...' : 'Para você'}
+                    </Text>
+                    </TouchableOpacity>
 
                     <View style={styles.sortWrapper}>
                     <TouchableOpacity
